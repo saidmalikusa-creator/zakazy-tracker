@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Учёт заказов</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #10161f;
+    --surface: #1b2430;
+    --surface-2: #212b39;
+    --surface-hover: #263241;
+    --border: rgba(255,255,255,0.07);
+    --text: #eef1f6;
+    --text-dim: #8996a8;
+    --text-faint: #57647a;
+    --green: #34c785;
+    --green-strong: #29a86e;
+    --green-dim: rgba(52,199,133,0.14);
+    --red: #e8564f;
+    --red-dim: rgba(232,86,79,0.14);
+    --amber: #e3a53e;
+    --amber-dim: rgba(227,165,62,0.14);
+    --r-lg: 16px;
+    --r-md: 12px;
+    --r-sm: 9px;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  button, input, textarea { font-family: inherit; color: inherit; }
+  input, textarea { -webkit-appearance: none; appearance: none; }
+  button { cursor: pointer; background: none; border: none; }
+  ::placeholder { color: var(--text-faint); }
+
+  :focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+
+  .app {
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 28px;
+    position: relative;
+  }
+
+  /* Topbar */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 18px 6px;
+  }
+  .topbar h1 {
+    font-size: 19px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.2px;
+  }
+  .menu-wrap { position: relative; }
+  .icon-btn {
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    color: var(--text-dim);
+    transition: background 0.15s, color 0.15s;
+  }
+  .icon-btn:hover { background: var(--surface); color: var(--text); }
+  .icon-btn:active { background: var(--surface-2); }
+
+  .menu-panel {
+    position: absolute;
+    top: 42px; right: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    min-width: 200px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+    z-index: 300;
+    padding: 6px;
+    opacity: 0; transform: translateY(-6px) scale(0.98);
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+  .menu-panel.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+  .menu-item {
+    width: 100%; text-align: left;
+    padding: 10px 12px;
+    border-radius: var(--r-sm);
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--text);
+    display: flex; align-items: center; gap: 9px;
+  }
+  .menu-item:hover { background: var(--surface-hover); }
+  .menu-item.danger { color: var(--red); }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 8px;
+    padding: 12px 18px 16px;
+  }
+  .tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px 4px;
+    background: var(--surface);
+    border-radius: var(--r-md);
+    color: var(--text-dim);
+    position: relative;
+    transition: background 0.15s ease, color 0.15s ease;
+    min-height: 60px;
+  }
+  .tab:active { transform: scale(0.98); }
+  .tab span.tlabel {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+  }
+  .tab.active {
+    background: var(--green);
+    color: #08150f;
+  }
+  .tab .tbadge {
+    position: absolute;
+    top: 6px; right: 8px;
+    background: var(--amber);
+    color: #241a05;
+    font-size: 10px;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+  }
+  .tab.active .tbadge { background: rgba(8,21,15,0.2); color: #08150f; }
+
+  main { padding: 0 18px; flex: 1; }
+  .panel { display: block; }
+  .panel.hidden { display: none; }
+
+  /* Form fields */
+  .field {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    background: var(--surface);
+    border: 1px solid transparent;
+    border-radius: var(--r-lg);
+    padding: 13px 14px;
+    margin-bottom: 10px;
+    transition: border-color 0.15s ease;
+  }
+  .field.error { border-color: var(--red); }
+  .field .ficon {
+    width: 22px; height: 22px;
+    color: var(--text-faint);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .field .fbody { flex: 1; min-width: 0; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+  }
+  .field input, .field textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 15.5px;
+    font-weight: 500;
+    color: var(--text);
+    padding: 0;
+    resize: none;
+    line-height: 1.4;
+  }
+  .field textarea { min-height: 44px; }
+  .field.products textarea { min-height: 66px; }
+
+  .btn-primary {
+    width: 100%;
+    background: var(--green);
+    color: #08150f;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 15px;
+    border-radius: var(--r-lg);
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin-top: 6px;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  .btn-primary:hover { background: var(--green-strong); }
+  .btn-primary:active { transform: scale(0.98); }
+
+  /* Search + filter row */
+  .search-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+    position: relative;
+  }
+  .search-box {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    background: var(--surface);
+    border-radius: var(--r-md);
+    padding: 11px 14px;
+  }
+  .search-box svg { color: var(--text-faint); flex-shrink: 0; }
+  .search-box input {
+    flex: 1; min-width: 0;
+    background: transparent; border: none; outline: none;
+    color: var(--text); font-size: 14.5px;
+  }
+  .search-box .clear-search {
+    color: var(--text-faint);
+    display: none;
+    align-items: center;
+    padding: 0 2px;
+  }
+  .search-box .clear-search.show { display: flex; }
+
+  .filter-btn {
+    width: 42px; height: 42px;
+    background: var(--surface);
+    border-radius: var(--r-md);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .filter-btn.active-filter { background: var(--green-dim); color: var(--green); }
+
+  .filter-chips {
+    display: none;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin: -6px 0 14px;
+  }
+  .filter-chips.open { display: flex; }
+  .chip {
+    padding: 7px 13px;
+    background: var(--surface);
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-dim);
+  }
+  .chip.active { background: var(--green); color: #08150f; }
+
+  /* Order list & cards */
+  .order-list { display: flex; flex-direction: column; gap: 12px; transition: opacity 0.15s ease; }
+  .order-card {
+    background: var(--surface);
+    border-radius: var(--r-lg);
+    padding: 15px 16px;
+  }
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 9px;
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.3;
+  }
+  .status-badge {
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .status-badge.sent { background: var(--green-dim); color: var(--green); }
+  .status-badge.cancelled { background: var(--red-dim); color: var(--red); }
+
+  .card-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 13.5px;
+    color: var(--text-dim);
+    margin-bottom: 5px;
+    line-height: 1.4;
+  }
+  .card-row .ico { color: var(--text-faint); flex-shrink: 0; margin-top: 2px; }
+  .card-products {
+    font-size: 13.5px;
+    color: var(--text-dim);
+    line-height: 1.45;
+    background: var(--surface-2);
+    border-radius: var(--r-sm);
+    padding: 9px 11px;
+    margin-top: 8px;
+  }
+  .card-amount {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 14.5px;
+    font-weight: 700;
+    color: var(--green);
+    margin-top: 9px;
+  }
+  .card-amount .ico { color: var(--green); flex-shrink: 0; }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] { -moz-appearance: textfield; }
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 11px;
+    padding-top: 11px;
+    border-top: 1px solid var(--border);
+  }
+  .card-date {
+    font-size: 12px;
+    color: var(--text-faint);
+    font-weight: 500;
+  }
+  .card-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .icon-btn.sm {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--text-dim);
+  }
+  .icon-btn.sm.danger:hover, .icon-btn.sm.danger:active { background: var(--red-dim); color: var(--red); }
+  .icon-btn.sm.success:hover, .icon-btn.sm.success:active { background: var(--green-dim); color: var(--green); }
+  .icon-btn.sm.neutral:hover, .icon-btn.sm.neutral:active { background: var(--surface-hover); color: var(--text); }
+  .icon-btn.sm:hover { background: var(--surface-hover); }
+
+  .paid-badge {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 12px;
+    border-radius: 999px;
+    display: flex; align-items: center; gap: 5px;
+    background: var(--amber-dim);
+    color: var(--amber);
+  }
+  .paid-badge.paid { background: var(--green-dim); color: var(--green); }
+
+  .empty-state {
+    text-align: center;
+    padding: 52px 20px;
+    color: var(--text-faint);
+  }
+  .empty-state svg { margin-bottom: 12px; opacity: 0.5; }
+  .empty-state p { font-size: 14.5px; font-weight: 600; color: var(--text-dim); margin: 0 0 4px; }
+  .empty-state span { font-size: 13px; line-height: 1.4; display: block; max-width: 260px; margin: 0 auto; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    left: 50%; bottom: 22px;
+    transform: translateX(-50%) translateY(16px);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px 20px;
+    border-radius: 999px;
+    font-size: 13.5px;
+    font-weight: 600;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    z-index: 400;
+    max-width: 88%;
+    text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.error { background: #3a1918; color: #ffb3af; border-color: rgba(232,86,79,0.3); }
+
+  /* Loading */
+  .loading-overlay {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 999;
+    transition: opacity 0.25s ease;
+  }
+  .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  .spinner {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    border: 3px solid var(--surface-2);
+    border-top-color: var(--green);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Inline edit card */
+  .order-card.editing { padding-bottom: 14px; }
+  .edit-field { margin-bottom: 9px; }
+  .edit-field label {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .edit-field input, .edit-field textarea {
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    padding: 9px 11px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    outline: none;
+    resize: none;
+    line-height: 1.4;
+    transition: border-color 0.15s ease;
+  }
+  .edit-field textarea { min-height: 40px; }
+  .edit-field.error input, .edit-field.error textarea { border-color: var(--red); }
+  .edit-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .btn-edit-cancel, .btn-edit-save {
+    flex: 1;
+    padding: 10px;
+    border-radius: var(--r-sm);
+    font-size: 13.5px;
+    font-weight: 700;
+    text-align: center;
+  }
+  .btn-edit-cancel { background: var(--surface-2); color: var(--text-dim); }
+  .btn-edit-cancel:hover { background: var(--surface-hover); }
+  .btn-edit-save { background: var(--green); color: #08150f; }
+  .btn-edit-save:hover { background: var(--green-strong); }
+  .btn-edit-save:active, .btn-edit-cancel:active { transform: scale(0.98); }
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
+
+<div class="app">
+  <div class="topbar">
+    <h1>Учёт заказов</h1>
+    <div class="menu-wrap">
+      <button class="icon-btn" id="menuBtn" aria-label="Меню" title="Меню"></button>
+      <div class="menu-panel" id="menuPanel">
+        <button class="menu-item danger" id="clearDataBtn"></button>
+      </div>
+    </div>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="new">
+      <span class="ticon"></span>
+      <span class="tlabel">Новый заказ</span>
+    </button>
+    <button class="tab" data-tab="list">
+      <span class="ticon"></span>
+      <span class="tlabel">Список заказов</span>
+      <span class="tbadge" id="activeCount">0</span>
+    </button>
+    <button class="tab" data-tab="closed">
+      <span class="ticon"></span>
+      <span class="tlabel">Закрытые заказы</span>
+    </button>
+  </nav>
+
+  <main>
+    <!-- NEW ORDER -->
+    <section class="panel" id="panel-new">
+      <form id="newOrderForm" novalidate>
+        <div class="field" id="fieldPhone">
+          <span class="ficon"></span>
+          <div class="fbody">
+            <label for="fPhone">Телефон номер</label>
+            <input type="tel" id="fPhone" inputmode="numeric" placeholder="+998 XX XXX XX XX" autocomplete="off">
+          </div>
+        </div>
+        <div class="field" id="fieldFio">
+          <span class="ficon"></span>
+          <div class="fbody">
+            <label for="fFio">ФИО</label>
+            <input type="text" id="fFio" placeholder="Введите ФИО" autocomplete="off">
+          </div>
+        </div>
+        <div class="field" id="fieldAddress">
+          <span class="ficon"></span>
+          <div class="fbody">
+            <label for="fAddress">Адрес</label>
+            <textarea id="fAddress" rows="2" placeholder="Введите адрес"></textarea>
+          </div>
+        </div>
+        <div class="field products" id="fieldProducts">
+          <span class="ficon"></span>
+          <div class="fbody">
+            <label for="fProducts">Список товаров</label>
+            <textarea id="fProducts" rows="3" placeholder="Добавьте список товаров"></textarea>
+          </div>
+        </div>
+        <div class="field" id="fieldAmount">
+          <span class="ficon"></span>
+          <div class="fbody">
+            <label for="fAmount">Сумма заказа, сум</label>
+            <input type="number" id="fAmount" inputmode="decimal" min="0" placeholder="0" autocomplete="off">
+          </div>
+        </div>
+        <button type="submit" class="btn-primary">
+          <span id="submitIcon"></span>
+          Добавить заказ
+        </button>
+      </form>
+    </section>
+
+    <!-- ACTIVE LIST -->
+    <section class="panel hidden" id="panel-list">
+      <div class="search-row">
+        <div class="search-box">
+          <span class="sicon"></span>
+          <input type="text" id="searchList" placeholder="Поиск по заказам">
+          <button class="clear-search" id="clearSearchList" aria-label="Очистить"></button>
+        </div>
+        <button class="filter-btn" id="sortListBtn" title="Порядок сортировки"></button>
+      </div>
+      <div class="order-list" id="listOrders"></div>
+    </section>
+
+    <!-- CLOSED LIST -->
+    <section class="panel hidden" id="panel-closed">
+      <div class="search-row">
+        <div class="search-box">
+          <span class="sicon"></span>
+          <input type="text" id="searchClosed" placeholder="Поиск по заказам">
+          <button class="clear-search" id="clearSearchClosed" aria-label="Очистить"></button>
+        </div>
+        <button class="filter-btn" id="filterClosedBtn" title="Фильтр по статусу"></button>
+      </div>
+      <div class="filter-chips" id="closedChips">
+        <button class="chip active" data-status="all">Все</button>
+        <button class="chip" data-status="sent">Отправлен</button>
+        <button class="chip" data-status="cancelled">Отменён</button>
+      </div>
+      <div class="order-list" id="closedOrders"></div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- Telegram Mini App detection + Cloud Storage bridge ---------- */
+  var TG = null;
+  var inTelegram = false;
+  try {
+    if (window.Telegram && window.Telegram.WebApp) {
+      TG = window.Telegram.WebApp;
+      TG.ready();
+      TG.expand();
+      inTelegram = !!(TG.CloudStorage && typeof TG.CloudStorage.setItem === 'function');
+    }
+  } catch (e) { /* not running inside Telegram, ignore */ }
+
+  var CLOUD_PREFIX = 'order_';
+
+  /* Адрес Cloudflare Worker, который пересылает текст заказа в бот через
+     Bot API. Замените на свой после деплоя воркера (см. worker.js).
+     Пока здесь плейсхолдер — пересылка просто не будет срабатывать. */
+  var NOTIFY_WORKER_URL = 'https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev';
+
+  function tgSetItem(key, value) {
+    return new Promise(function (resolve, reject) {
+      TG.CloudStorage.setItem(key, value, function (err, ok) {
+        if (err) reject(err); else resolve(ok);
+      });
+    });
+  }
+  function tgGetKeys() {
+    return new Promise(function (resolve, reject) {
+      TG.CloudStorage.getKeys(function (err, keys) {
+        if (err) reject(err); else resolve(keys || []);
+      });
+    });
+  }
+  function tgGetItems(keys) {
+    return new Promise(function (resolve, reject) {
+      if (!keys.length) { resolve({}); return; }
+      TG.CloudStorage.getItems(keys, function (err, values) {
+        if (err) reject(err); else resolve(values || {});
+      });
+    });
+  }
+  function tgRemoveItems(keys) {
+    return new Promise(function (resolve, reject) {
+      if (!keys.length) { resolve(true); return; }
+      TG.CloudStorage.removeItems(keys, function (err, ok) {
+        if (err) reject(err); else resolve(ok);
+      });
+    });
+  }
+
+  /* ---------- Icons ---------- */
+  var ICONS = {
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>',
+    user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    pin: '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
+    search: '<circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>',
+    filter: '<path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>',
+    trash: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/>',
+    check: '<path d="M20 6L9 17l-5-5"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    dots: '<circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/>',
+    x: '<path d="M18 6L6 18M6 6l12 12"/>',
+    undo: '<path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2.6-7.5L3 8"/>',
+    sort: '<path d="M3 6h18M6 12h12M10 18h4"/>',
+    edit: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
+    inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    banknote: '<rect x="2" y="7" width="20" height="10" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>'
+  };
+  function icon(name, size) {
+    size = size || 20;
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || '') + '</svg>';
+  }
+
+  /* ---------- Static icon placements ---------- */
+  document.getElementById('menuBtn').innerHTML = icon('dots', 18);
+  document.getElementById('clearDataBtn').innerHTML = icon('trash', 15) + ' Очистить все данные';
+  document.querySelectorAll('#tabs .tab')[0].querySelector('.ticon').innerHTML = icon('plus', 17);
+  document.querySelectorAll('#tabs .tab')[1].querySelector('.ticon').innerHTML = icon('list', 17);
+  document.querySelectorAll('#tabs .tab')[2].querySelector('.ticon').innerHTML = icon('lock', 17);
+  document.getElementById('fieldPhone').querySelector('.ficon').innerHTML = icon('phone', 20);
+  document.getElementById('fieldFio').querySelector('.ficon').innerHTML = icon('user', 20);
+  document.getElementById('fieldAddress').querySelector('.ficon').innerHTML = icon('pin', 20);
+  document.getElementById('fieldProducts').querySelector('.ficon').innerHTML = icon('list', 20);
+  document.getElementById('fieldAmount').querySelector('.ficon').innerHTML = icon('banknote', 20);
+  document.getElementById('submitIcon').innerHTML = icon('plus', 17);
+  document.querySelectorAll('.search-box .sicon').forEach(function (el) { el.innerHTML = icon('search', 17); });
+  document.querySelectorAll('.clear-search').forEach(function (el) { el.innerHTML = icon('x', 14); });
+  document.getElementById('sortListBtn').innerHTML = icon('sort', 17);
+  document.getElementById('filterClosedBtn').innerHTML = icon('filter', 16);
+
+  /* ---------- State ---------- */
+  var orders = [];
+  var searchList = '';
+  var searchClosed = '';
+  var listSortDesc = true;
+  var closedStatusFilter = 'all';
+  var editingOrderId = null;
+
+  /* ---------- DOM refs ---------- */
+  var loadingOverlay = document.getElementById('loadingOverlay');
+  var menuBtn = document.getElementById('menuBtn');
+  var menuPanel = document.getElementById('menuPanel');
+  var clearDataBtn = document.getElementById('clearDataBtn');
+  var tabButtons = document.querySelectorAll('#tabs .tab');
+  var panels = document.querySelectorAll('.panel');
+  var activeCountEl = document.getElementById('activeCount');
+
+  var newOrderForm = document.getElementById('newOrderForm');
+  var fPhone = document.getElementById('fPhone');
+  var fFio = document.getElementById('fFio');
+  var fAddress = document.getElementById('fAddress');
+  var fProducts = document.getElementById('fProducts');
+  var fAmount = document.getElementById('fAmount');
+
+  var searchListInput = document.getElementById('searchList');
+  var clearSearchListBtn = document.getElementById('clearSearchList');
+  var sortListBtn = document.getElementById('sortListBtn');
+  var listOrdersEl = document.getElementById('listOrders');
+
+  var searchClosedInput = document.getElementById('searchClosed');
+  var clearSearchClosedBtn = document.getElementById('clearSearchClosed');
+  var filterClosedBtn = document.getElementById('filterClosedBtn');
+  var closedChips = document.getElementById('closedChips');
+  var closedOrdersEl = document.getElementById('closedOrders');
+
+  var toastEl = document.getElementById('toast');
+  var toastTimer = null;
+
+  /* ---------- Utilities ---------- */
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  function nl2br(str) { return escapeHtml(str).replace(/\n/g, '<br>'); }
+
+  function generateId() {
+    return 'o_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function formatDate(iso, withTime) {
+    var d = new Date(iso);
+    var dd = String(d.getDate()).padStart(2, '0');
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var yyyy = d.getFullYear();
+    var out = dd + '.' + mm + '.' + yyyy;
+    if (withTime) {
+      var hh = String(d.getHours()).padStart(2, '0');
+      var min = String(d.getMinutes()).padStart(2, '0');
+      out += ', ' + hh + ':' + min;
+    }
+    return out;
+  }
+
+  function formatPhoneInput(value) {
+    var digits = value.replace(/\D/g, '');
+    // Первая обрезка — всегда: поле само подставляет фиксированный
+    // префикс "+998 " при фокусе, и эти 3 цифры никогда не введены
+    // пользователем, их нужно снимать безусловно (иначе при обычном
+    // ручном наборе "998" остаётся приклеенным к введённым цифрам).
+    if (digits.indexOf('998') === 0) digits = digits.slice(3);
+    // Вторая обрезка — только если после первой всё ещё больше 9 цифр:
+    // это значит, что вставленный текст сам содержал код страны (вставка
+    // полного "+998..." номера поверх префикса). Условие "length > 9"
+    // защищает настоящий 9-значный локальный номер, который сам по себе
+    // начинается с "998" (оператор 99 + цифра 8), от лишней обрезки.
+    while (digits.length > 9 && digits.indexOf('998') === 0) {
+      digits = digits.slice(3);
+    }
+    digits = digits.slice(0, 9);
+    var out = '+998';
+    if (digits.length > 0) out += ' ' + digits.slice(0, 2);
+    if (digits.length > 2) out += ' ' + digits.slice(2, 5);
+    if (digits.length > 5) out += ' ' + digits.slice(5, 7);
+    if (digits.length > 7) out += ' ' + digits.slice(7, 9);
+    return out;
+  }
+
+  function digitsOnly(str) { return (str || '').replace(/\D/g, ''); }
+
+  function formatAmount(n) {
+    var num = Math.round(Number(n) || 0);
+    var s = String(Math.abs(num)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return (num < 0 ? '-' : '') + s + ' сум';
+  }
+
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) { /* fall through to fallback */ }
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function showToast(msg, isError) {
+    clearTimeout(toastTimer);
+    toastEl.textContent = msg;
+    toastEl.classList.toggle('error', !!isError);
+    toastEl.classList.add('show');
+    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 2200);
+  }
+
+  function emptyState(title, hint) {
+    return '<div class="empty-state">' + icon('inbox', 34) + '<p>' + escapeHtml(title) + '</p>' +
+      (hint ? '<span>' + escapeHtml(hint) + '</span>' : '') + '</div>';
+  }
+
+  /* ---------- Storage ---------- */
+  /* In Telegram: each order is its own Cloud Storage key, synced to the user's
+     Telegram account and unaffected by closing the app. Outside Telegram
+     (e.g. while testing here in chat): the whole list lives in one
+     artifact-storage key, same as before. */
+  async function loadOrders() {
+    if (inTelegram) {
+      try {
+        var keys = await tgGetKeys();
+        var orderKeys = keys.filter(function (k) { return k.indexOf(CLOUD_PREFIX) === 0; });
+        var items = await tgGetItems(orderKeys);
+        var result = [];
+        orderKeys.forEach(function (k) {
+          if (items[k]) {
+            try { result.push(JSON.parse(items[k])); } catch (e) { /* skip corrupt entry */ }
+          }
+        });
+        orders = result;
+      } catch (e) {
+        orders = [];
+        showToast('Не удалось загрузить данные', true);
+      }
+    } else {
+      try {
+        var r = await window.storage.get('orders', false);
+        orders = (r && r.value) ? JSON.parse(r.value) : [];
+      } catch (e) {
+        orders = [];
+      }
+    }
+  }
+
+  async function persistOrder(order) {
+    if (inTelegram) {
+      try {
+        await tgSetItem(CLOUD_PREFIX + order.id, JSON.stringify(order));
+      } catch (e) {
+        showToast('Не удалось сохранить данные', true);
+      }
+    } else {
+      await saveAllOrdersBlob();
+    }
+  }
+
+  async function persistRemoved(ids) {
+    if (inTelegram) {
+      try {
+        await tgRemoveItems(ids.map(function (id) { return CLOUD_PREFIX + id; }));
+      } catch (e) {
+        showToast('Не удалось удалить данные', true);
+      }
+    } else {
+      await saveAllOrdersBlob();
+    }
+  }
+
+  async function saveAllOrdersBlob() {
+    try {
+      var result = await window.storage.set('orders', JSON.stringify(orders), false);
+      if (!result) showToast('Не удалось сохранить данные', true);
+    } catch (e) {
+      showToast('Не удалось сохранить данные', true);
+    }
+  }
+
+  /* ---------- Bot notification ---------- */
+  /* Фоновая, не блокирующая попытка переслать текст заказа в бот через
+     Cloudflare Worker (см. worker.js). Заказ уже сохранён в CloudStorage
+     к моменту вызова, так что сбой сети здесь ни на что не влияет —
+     ошибка просто молча проглатывается. */
+  function notifyBotNewOrder(order) {
+    if (!inTelegram) return;
+    if (!NOTIFY_WORKER_URL || NOTIFY_WORKER_URL.indexOf('YOUR-WORKER') !== -1) return;
+    var text =
+      '🆕 Новый заказ\n' +
+      'ФИО: ' + order.fio + '\n' +
+      'Телефон: ' + order.phone + '\n' +
+      'Адрес: ' + order.address + '\n' +
+      'Товары: ' + order.products + '\n' +
+      'Сумма: ' + formatAmount(order.amount);
+    fetch(NOTIFY_WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: TG.initData, text: text })
+    }).catch(function () { /* тихо игнорируем сетевые сбои */ });
+  }
+
+  /* ---------- Mutations ---------- */
+  async function addOrder(data) {
+    var order = {
+      id: generateId(),
+      phone: data.phone,
+      fio: data.fio,
+      address: data.address,
+      products: data.products,
+      amount: data.amount,
+      createdAt: new Date().toISOString(),
+      status: 'active',
+      closedAt: null,
+      paid: false
+    };
+    orders.unshift(order);
+    await persistOrder(order);
+    updateActiveCount();
+    notifyBotNewOrder(order);
+  }
+
+  async function setOrderStatus(id, status) {
+    var o = orders.find(function (x) { return x.id === id; });
+    if (!o) return;
+    o.status = status;
+    o.closedAt = new Date().toISOString();
+    if (status !== 'sent') o.paid = false;
+    await persistOrder(o);
+    updateActiveCount();
+    renderListOrders();
+    renderClosedOrders();
+  }
+
+  async function restoreOrder(id) {
+    var o = orders.find(function (x) { return x.id === id; });
+    if (!o) return;
+    o.status = 'active';
+    o.closedAt = null;
+    o.paid = false;
+    await persistOrder(o);
+    updateActiveCount();
+    renderListOrders();
+    renderClosedOrders();
+    showToast('Заказ возвращён в активные');
+  }
+
+  async function saveOrderEdit(id, card) {
+    if (!card) return;
+    var phone = card.querySelector('.edit-phone').value.trim();
+    var fio = card.querySelector('.edit-fio').value.trim();
+    var address = card.querySelector('.edit-address').value.trim();
+    var products = card.querySelector('.edit-products').value.trim();
+    var amount = parseFloat(card.querySelector('.edit-amount').value);
+
+    var phoneDigits = digitsOnly(phone).replace(/^998/, '');
+    var checks = [
+      { sel: '[data-f="phone"]', ok: phoneDigits.length >= 7 },
+      { sel: '[data-f="fio"]', ok: fio.length > 0 },
+      { sel: '[data-f="address"]', ok: address.length > 0 },
+      { sel: '[data-f="products"]', ok: products.length > 0 },
+      { sel: '[data-f="amount"]', ok: !isNaN(amount) && amount > 0 }
+    ];
+    var valid = true;
+    checks.forEach(function (c) {
+      var el = card.querySelector(c.sel);
+      el.classList.toggle('error', !c.ok);
+      if (!c.ok) valid = false;
+    });
+    if (!valid) {
+      showToast('Заполните все поля перед сохранением', true);
+      return;
+    }
+
+    var o = orders.find(function (x) { return x.id === id; });
+    if (!o) return;
+    o.phone = phone;
+    o.fio = fio;
+    o.address = address;
+    o.products = products;
+    o.amount = amount;
+    await persistOrder(o);
+    editingOrderId = null;
+    renderListOrders();
+    showToast('Изменения сохранены');
+  }
+
+  async function togglePaid(id) {
+    var o = orders.find(function (x) { return x.id === id; });
+    if (!o) return;
+    o.paid = !o.paid;
+    await persistOrder(o);
+    renderClosedOrders();
+  }
+
+  async function clearAllData() {
+    var ids = orders.map(function (o) { return o.id; });
+    orders = [];
+    await persistRemoved(ids);
+    updateActiveCount();
+    renderListOrders();
+    renderClosedOrders();
+    showToast('Все данные удалены');
+  }
+
+  async function copyOrder(id) {
+    var o = orders.find(function (x) { return x.id === id; });
+    if (!o) return;
+    var text = 'Заказ\nФИО: ' + o.fio + '\nТелефон: ' + o.phone + '\nАдрес: ' + o.address + '\nТовары: ' + o.products + '\nСумма: ' + formatAmount(o.amount);
+    var ok = await copyText(text);
+    showToast(ok ? 'Скопировано' : 'Не удалось скопировать', !ok);
+  }
+
+  /* ---------- Rendering ---------- */
+  function updateActiveCount() {
+    var n = orders.filter(function (o) { return o.status === 'active'; }).length;
+    activeCountEl.textContent = n;
+    activeCountEl.style.display = n > 0 ? 'flex' : 'none';
+  }
+
+  function matchesQuery(o, q) {
+    if (!q) return true;
+    var qd = digitsOnly(q);
+    var ql = q.toLowerCase();
+    if (qd && digitsOnly(o.phone).indexOf(qd) !== -1) return true;
+    if (o.fio.toLowerCase().indexOf(ql) !== -1) return true;
+    if (o.address.toLowerCase().indexOf(ql) !== -1) return true;
+    return false;
+  }
+
+  function cardActionsRow(dateHtml, buttonsHtml) {
+    return '<div class="card-footer"><span class="card-date">' + dateHtml + '</span><div class="card-actions">' + buttonsHtml + '</div></div>';
+  }
+
+  function renderListOrders() {
+    var q = searchList.trim();
+    var items = orders.filter(function (o) { return o.status === 'active' && matchesQuery(o, q); });
+    items.sort(function (a, b) {
+      var diff = new Date(b.createdAt) - new Date(a.createdAt);
+      return listSortDesc ? diff : -diff;
+    });
+
+    if (items.length === 0) {
+      listOrdersEl.innerHTML = q
+        ? emptyState('Ничего не найдено', 'Проверьте номер телефона или измените запрос')
+        : emptyState('Пока нет активных заказов', 'Добавьте новый заказ — он появится здесь');
+      return;
+    }
+
+    listOrdersEl.innerHTML = items.map(function (o) {
+      if (o.id === editingOrderId) return renderEditCard(o);
+      var buttons =
+        '<button class="icon-btn sm" data-action="copy" data-id="' + o.id + '" title="Копировать">' + icon('copy', 15) + '</button>' +
+        '<button class="icon-btn sm neutral" data-action="edit" data-id="' + o.id + '" title="Редактировать">' + icon('edit', 15) + '</button>' +
+        '<button class="icon-btn sm danger" data-action="cancel" data-id="' + o.id + '" title="Отменить">' + icon('trash', 15) + '</button>' +
+        '<button class="icon-btn sm success" data-action="complete" data-id="' + o.id + '" title="Завершить">' + icon('check', 16) + '</button>';
+      return (
+        '<div class="order-card">' +
+          '<div class="card-top"><div class="card-title">' + escapeHtml(o.fio) + '</div></div>' +
+          '<div class="card-row"><span class="ico">' + icon('phone', 14) + '</span>' + escapeHtml(o.phone) + '</div>' +
+          '<div class="card-row"><span class="ico">' + icon('pin', 14) + '</span>' + nl2br(o.address) + '</div>' +
+          '<div class="card-products">' + nl2br(o.products) + '</div>' +
+          '<div class="card-amount">' + icon('banknote', 15) + '<span>' + formatAmount(o.amount) + '</span></div>' +
+          cardActionsRow('Дата: ' + formatDate(o.createdAt), buttons) +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function renderEditCard(o) {
+    return (
+      '<div class="order-card editing">' +
+        '<div class="edit-field" data-f="phone"><label>Телефон номер</label>' +
+          '<input type="tel" class="edit-phone" inputmode="numeric" value="' + escapeHtml(o.phone) + '"></div>' +
+        '<div class="edit-field" data-f="fio"><label>ФИО</label>' +
+          '<input type="text" class="edit-fio" value="' + escapeHtml(o.fio) + '"></div>' +
+        '<div class="edit-field" data-f="address"><label>Адрес</label>' +
+          '<textarea class="edit-address" rows="2">' + escapeHtml(o.address) + '</textarea></div>' +
+        '<div class="edit-field" data-f="products"><label>Список товаров</label>' +
+          '<textarea class="edit-products" rows="3">' + escapeHtml(o.products) + '</textarea></div>' +
+        '<div class="edit-field" data-f="amount"><label>Сумма заказа, сум</label>' +
+          '<input type="number" class="edit-amount" min="0" value="' + (Number(o.amount) || 0) + '"></div>' +
+        '<div class="edit-actions">' +
+          '<button type="button" class="btn-edit-cancel" data-action="cancelEdit" data-id="' + o.id + '">Отмена</button>' +
+          '<button type="button" class="btn-edit-save" data-action="saveEdit" data-id="' + o.id + '">Сохранить</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderClosedOrders() {
+    var q = searchClosed.trim();
+    var items = orders.filter(function (o) {
+      if (o.status === 'active') return false;
+      if (closedStatusFilter !== 'all' && o.status !== closedStatusFilter) return false;
+      return matchesQuery(o, q);
+    });
+    items.sort(function (a, b) { return new Date(b.closedAt) - new Date(a.closedAt); });
+
+    if (items.length === 0) {
+      closedOrdersEl.innerHTML = q
+        ? emptyState('Ничего не найдено', 'Проверьте номер телефона или измените запрос')
+        : emptyState('Пока нет закрытых заказов', 'Завершённые и отменённые заказы появятся здесь');
+      return;
+    }
+
+    closedOrdersEl.innerHTML = items.map(function (o) {
+      var statusLabel = o.status === 'sent' ? 'Отправлен' : 'Отменён';
+      var statusClass = o.status === 'sent' ? 'sent' : 'cancelled';
+      var paidBadge = o.status === 'sent'
+        ? '<button class="paid-badge ' + (o.paid ? 'paid' : '') + '" data-action="togglePaid" data-id="' + o.id + '">' +
+            (o.paid ? icon('check', 12) + ' Оплачено' : 'Не оплачено') +
+          '</button>'
+        : '';
+      var buttons =
+        paidBadge +
+        '<button class="icon-btn sm" data-action="copy" data-id="' + o.id + '" title="Копировать">' + icon('copy', 15) + '</button>' +
+        '<button class="icon-btn sm neutral" data-action="restore" data-id="' + o.id + '" title="Вернуть в активные">' + icon('undo', 15) + '</button>';
+      return (
+        '<div class="order-card">' +
+          '<div class="card-top">' +
+            '<div class="card-title">' + escapeHtml(o.fio) + '</div>' +
+            '<div class="status-badge ' + statusClass + '">' + statusLabel + '</div>' +
+          '</div>' +
+          '<div class="card-row"><span class="ico">' + icon('phone', 14) + '</span>' + escapeHtml(o.phone) + '</div>' +
+          '<div class="card-row"><span class="ico">' + icon('pin', 14) + '</span>' + nl2br(o.address) + '</div>' +
+          '<div class="card-products">' + nl2br(o.products) + '</div>' +
+          '<div class="card-amount">' + icon('banknote', 15) + '<span>' + formatAmount(o.amount) + '</span></div>' +
+          cardActionsRow(formatDate(o.closedAt, true), buttons) +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  /* ---------- Validation ---------- */
+  function validateNewOrder() {
+    var valid = true;
+    var phoneDigits = digitsOnly(fPhone.value).replace(/^998/, '');
+    var amountValue = parseFloat(fAmount.value);
+    var checks = [
+      { field: document.getElementById('fieldPhone'), ok: phoneDigits.length >= 7 },
+      { field: document.getElementById('fieldFio'), ok: fFio.value.trim().length > 0 },
+      { field: document.getElementById('fieldAddress'), ok: fAddress.value.trim().length > 0 },
+      { field: document.getElementById('fieldProducts'), ok: fProducts.value.trim().length > 0 },
+      { field: document.getElementById('fieldAmount'), ok: !isNaN(amountValue) && amountValue > 0 }
+    ];
+    checks.forEach(function (c) {
+      c.field.classList.toggle('error', !c.ok);
+      if (!c.ok) valid = false;
+    });
+    return valid;
+  }
+
+  /* ---------- Events ---------- */
+  menuBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    menuPanel.classList.toggle('open');
+  });
+  document.addEventListener('click', function () { menuPanel.classList.remove('open'); });
+  menuPanel.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  clearDataBtn.addEventListener('click', function () {
+    menuPanel.classList.remove('open');
+    if (orders.length === 0) { showToast('Данных пока нет'); return; }
+    if (window.confirm('Удалить все заказы без возможности восстановления?')) {
+      clearAllData();
+    }
+  });
+
+  tabButtons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var tab = btn.getAttribute('data-tab');
+      tabButtons.forEach(function (b) { b.classList.toggle('active', b === btn); });
+      panels.forEach(function (p) { p.classList.toggle('hidden', p.id !== 'panel-' + tab); });
+      if (tab === 'list') renderListOrders();
+      if (tab === 'closed') renderClosedOrders();
+    });
+  });
+
+  fPhone.addEventListener('input', function () {
+    fPhone.value = formatPhoneInput(fPhone.value);
+  });
+  fPhone.addEventListener('focus', function () {
+    if (!fPhone.value) fPhone.value = '+998 ';
+  });
+
+  newOrderForm.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    if (!validateNewOrder()) {
+      showToast('Заполните все поля перед добавлением', true);
+      return;
+    }
+    await addOrder({
+      phone: fPhone.value.trim(),
+      fio: fFio.value.trim(),
+      address: fAddress.value.trim(),
+      products: fProducts.value.trim(),
+      amount: parseFloat(fAmount.value) || 0
+    });
+    newOrderForm.reset();
+    ['fieldPhone', 'fieldFio', 'fieldAddress', 'fieldProducts', 'fieldAmount'].forEach(function (id) {
+      document.getElementById(id).classList.remove('error');
+    });
+    showToast('Заказ добавлен');
+  });
+
+  searchListInput.addEventListener('input', function () {
+    searchList = searchListInput.value;
+    clearSearchListBtn.classList.toggle('show', searchList.length > 0);
+    renderListOrders();
+  });
+  clearSearchListBtn.addEventListener('click', function () {
+    searchListInput.value = '';
+    searchList = '';
+    clearSearchListBtn.classList.remove('show');
+    renderListOrders();
+    searchListInput.focus();
+  });
+
+  searchClosedInput.addEventListener('input', function () {
+    searchClosed = searchClosedInput.value;
+    clearSearchClosedBtn.classList.toggle('show', searchClosed.length > 0);
+    renderClosedOrders();
+  });
+  clearSearchClosedBtn.addEventListener('click', function () {
+    searchClosedInput.value = '';
+    searchClosed = '';
+    clearSearchClosedBtn.classList.remove('show');
+    renderClosedOrders();
+    searchClosedInput.focus();
+  });
+
+  sortListBtn.addEventListener('click', function () {
+    listSortDesc = !listSortDesc;
+    sortListBtn.classList.toggle('active-filter', !listSortDesc);
+    sortListBtn.title = listSortDesc ? 'Сначала новые' : 'Сначала старые';
+    renderListOrders();
+  });
+
+  filterClosedBtn.addEventListener('click', function () {
+    closedChips.classList.toggle('open');
+    filterClosedBtn.classList.toggle('active-filter', closedChips.classList.contains('open'));
+  });
+  closedChips.querySelectorAll('.chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      closedStatusFilter = chip.getAttribute('data-status');
+      closedChips.querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('active', c === chip); });
+      renderClosedOrders();
+    });
+  });
+
+  listOrdersEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var id = btn.getAttribute('data-id');
+    var action = btn.getAttribute('data-action');
+    if (action === 'cancel') setOrderStatus(id, 'cancelled');
+    else if (action === 'complete') setOrderStatus(id, 'sent');
+    else if (action === 'copy') copyOrder(id);
+    else if (action === 'edit') { editingOrderId = id; renderListOrders(); }
+    else if (action === 'cancelEdit') { editingOrderId = null; renderListOrders(); }
+    else if (action === 'saveEdit') saveOrderEdit(id, btn.closest('.order-card'));
+  });
+
+  listOrdersEl.addEventListener('input', function (e) {
+    if (e.target.classList.contains('edit-phone')) {
+      e.target.value = formatPhoneInput(e.target.value);
+    }
+  });
+
+  closedOrdersEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var id = btn.getAttribute('data-id');
+    var action = btn.getAttribute('data-action');
+    if (action === 'copy') copyOrder(id);
+    else if (action === 'restore') restoreOrder(id);
+    else if (action === 'togglePaid') togglePaid(id);
+  });
+
+  /* ---------- Init ---------- */
+  async function init() {
+    await loadOrders();
+    updateActiveCount();
+    renderListOrders();
+    renderClosedOrders();
+    loadingOverlay.classList.add('hidden');
+  }
+  init();
+})();
+</script>
+</body>
+</html>

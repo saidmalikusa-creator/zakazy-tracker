@@ -473,6 +473,33 @@
   .btn-edit-save { background: var(--green); color: #08150f; }
   .btn-edit-save:hover { background: var(--green-strong); }
   .btn-edit-save:active, .btn-edit-cancel:active { transform: scale(0.98); }
+
+  /* ---------- Печать этикеток ---------- */
+  .filter-btn.select-mode { background: var(--green-dim); color: var(--green); }
+  .icon-btn.sm.print:hover, .icon-btn.sm.print:active { background: var(--green-dim); color: var(--green); }
+  .order-card.selectable { cursor: pointer; }
+  .order-card.selected { box-shadow: inset 0 0 0 2px var(--green); }
+  .sel-check {
+    width: 24px; height: 24px; border-radius: 50%;
+    border: 2px solid var(--text-faint);
+    display: flex; align-items: center; justify-content: center;
+    color: transparent; flex-shrink: 0;
+  }
+  .order-card.selected .sel-check { background: var(--green); border-color: var(--green); color: #08150f; }
+  .print-bar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: none; gap: 8px; align-items: center;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    background: var(--surface); border-top: 1px solid var(--border);
+    z-index: 40;
+  }
+  .print-bar.show { display: flex; }
+  .print-bar button { padding: 13px 14px; border-radius: var(--r-md); font-weight: 600; font-size: 15px; }
+  .print-bar .pb-alt { background: var(--surface-2); color: var(--text); }
+  .print-bar .pb-main { flex: 1; background: var(--green); color: #08150f; }
+  .print-bar .pb-main:disabled { opacity: 0.4; }
+  body.has-print-bar .app { padding-bottom: 96px; }
+  body.has-print-bar .toast { bottom: 92px; }
 </style>
 </head>
 <body>
@@ -561,6 +588,7 @@
           <button class="clear-search" id="clearSearchList" aria-label="Очистить"></button>
         </div>
         <button class="filter-btn" id="sortListBtn" title="Порядок сортировки"></button>
+        <button class="filter-btn" id="selectModeBtn" title="Выбрать несколько заказов для печати"></button>
       </div>
       <div class="order-list" id="listOrders"></div>
     </section>
@@ -583,6 +611,12 @@
       <div class="order-list" id="closedOrders"></div>
     </section>
   </main>
+</div>
+
+<div class="print-bar" id="printBar">
+  <button class="pb-alt" id="pbAll" type="button">Все</button>
+  <button class="pb-alt" id="pbCancel" type="button">Отмена</button>
+  <button class="pb-main" id="pbPrint" type="button" disabled>Напечатать</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -658,6 +692,8 @@
     x: '<path d="M18 6L6 18M6 6l12 12"/>',
     undo: '<path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2.6-7.5L3 8"/>',
     sort: '<path d="M3 6h18M6 12h12M10 18h4"/>',
+    printer: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+    checksq: '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
     edit: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
     inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
     banknote: '<rect x="2" y="7" width="20" height="10" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>'
@@ -682,6 +718,7 @@
   document.querySelectorAll('.search-box .sicon').forEach(function (el) { el.innerHTML = icon('search', 17); });
   document.querySelectorAll('.clear-search').forEach(function (el) { el.innerHTML = icon('x', 14); });
   document.getElementById('sortListBtn').innerHTML = icon('sort', 17);
+  document.getElementById('selectModeBtn').innerHTML = icon('checksq', 17);
   document.getElementById('filterClosedBtn').innerHTML = icon('filter', 16);
 
   /* ---------- State ---------- */
@@ -691,6 +728,8 @@
   var listSortDesc = true;
   var closedStatusFilter = 'all';
   var editingOrderId = null;
+  var selectMode = false;
+  var selectedIds = {};
 
   /* ---------- DOM refs ---------- */
   var loadingOverlay = document.getElementById('loadingOverlay');
@@ -712,6 +751,11 @@
   var clearSearchListBtn = document.getElementById('clearSearchList');
   var sortListBtn = document.getElementById('sortListBtn');
   var listOrdersEl = document.getElementById('listOrders');
+  var selectModeBtn = document.getElementById('selectModeBtn');
+  var printBar = document.getElementById('printBar');
+  var pbAll = document.getElementById('pbAll');
+  var pbCancel = document.getElementById('pbCancel');
+  var pbPrint = document.getElementById('pbPrint');
 
   var searchClosedInput = document.getElementById('searchClosed');
   var clearSearchClosedBtn = document.getElementById('clearSearchClosed');
@@ -1057,18 +1101,22 @@
     listOrdersEl.innerHTML = items.map(function (o) {
       if (o.id === editingOrderId) return renderEditCard(o);
       var buttons =
+        '<button class="icon-btn sm print" data-action="print" data-id="' + o.id + '" title="Печать этикетки">' + icon('printer', 15) + '</button>' +
         '<button class="icon-btn sm" data-action="copy" data-id="' + o.id + '" title="Копировать">' + icon('copy', 15) + '</button>' +
         '<button class="icon-btn sm neutral" data-action="edit" data-id="' + o.id + '" title="Редактировать">' + icon('edit', 15) + '</button>' +
         '<button class="icon-btn sm danger" data-action="cancel" data-id="' + o.id + '" title="Отменить">' + icon('trash', 15) + '</button>' +
         '<button class="icon-btn sm success" data-action="complete" data-id="' + o.id + '" title="Завершить">' + icon('check', 16) + '</button>';
+      var isSel = selectMode && !!selectedIds[o.id];
+      var check = selectMode ? '<span class="sel-check">' + icon('check', 14) + '</span>' : '';
       return (
-        '<div class="order-card">' +
-          '<div class="card-top"><div class="card-title">' + escapeHtml(o.fio) + '</div></div>' +
+        '<div class="order-card' + (selectMode ? ' selectable' : '') + (isSel ? ' selected' : '') + '"' +
+          (selectMode ? ' data-action="toggleSelect" data-id="' + o.id + '"' : '') + '>' +
+          '<div class="card-top"><div class="card-title">' + escapeHtml(o.fio) + '</div>' + check + '</div>' +
           '<div class="card-row"><span class="ico">' + icon('phone', 14) + '</span>' + escapeHtml(o.phone) + '</div>' +
           '<div class="card-row"><span class="ico">' + icon('pin', 14) + '</span>' + nl2br(o.address) + '</div>' +
           '<div class="card-products">' + nl2br(o.products) + '</div>' +
           '<div class="card-amount">' + icon('banknote', 15) + '<span>' + formatAmount(o.amount) + '</span></div>' +
-          cardActionsRow('Дата: ' + formatDate(o.createdAt), buttons) +
+          cardActionsRow('Дата: ' + formatDate(o.createdAt), selectMode ? '' : buttons) +
         '</div>'
       );
     }).join('');
@@ -1179,6 +1227,7 @@
       var tab = btn.getAttribute('data-tab');
       tabButtons.forEach(function (b) { b.classList.toggle('active', b === btn); });
       panels.forEach(function (p) { p.classList.toggle('hidden', p.id !== 'panel-' + tab); });
+      if (tab !== 'list' && selectMode) setSelectMode(false);
       if (tab === 'list') renderListOrders();
       if (tab === 'closed') renderClosedOrders();
     });
@@ -1267,6 +1316,11 @@
     else if (action === 'edit') { editingOrderId = id; renderListOrders(); }
     else if (action === 'cancelEdit') { editingOrderId = null; renderListOrders(); }
     else if (action === 'saveEdit') saveOrderEdit(id, btn.closest('.order-card'));
+    else if (action === 'print') {
+      var po = orders.find(function (x) { return x.id === id; });
+      if (po) printOrders([po]);
+    }
+    else if (action === 'toggleSelect') toggleSelect(id);
   });
 
   listOrdersEl.addEventListener('input', function (e) {
@@ -1283,6 +1337,98 @@
     if (action === 'copy') copyOrder(id);
     else if (action === 'restore') restoreOrder(id);
     else if (action === 'togglePaid') togglePaid(id);
+  });
+
+  /* ---------- Печать этикеток ---------- */
+  var PRINT_PAGE_URL = '';   // пусто = страница print.html лежит рядом с этим файлом
+  var PRINT_MAX = 10;        // сколько заказов можно отправить на печать за один раз
+
+  function visibleActiveOrders() {
+    var q = searchList.trim();
+    var items = orders.filter(function (o) { return o.status === 'active' && matchesQuery(o, q); });
+    items.sort(function (a, b) {
+      var diff = new Date(b.createdAt) - new Date(a.createdAt);
+      return listSortDesc ? diff : -diff;
+    });
+    return items;
+  }
+
+  function toBase64Url(str) {
+    var bytes = new TextEncoder().encode(str), bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function printPageUrl() {
+    if (PRINT_PAGE_URL) return PRINT_PAGE_URL;
+    var p = window.location.pathname;
+    if (p.charAt(p.length - 1) !== '/' && p.split('/').pop().indexOf('.') === -1) p += '/';
+    return window.location.origin + p.replace(/[^\/]*$/, '') + 'print.html';
+  }
+
+  function buildPrintUrl(list) {
+    var payload = { v: 1, o: list.map(function (o) { return [o.fio, o.phone, o.address, o.products]; }) };
+    return printPageUrl() + '#j=' + toBase64Url(JSON.stringify(payload));
+  }
+
+  function openExternal(url) {
+    try {
+      if (TG && typeof TG.openLink === 'function') { TG.openLink(url, { try_instant_view: false }); return; }
+    } catch (e) { /* fall through */ }
+    window.open(url, '_blank');
+  }
+
+  function printOrders(list) {
+    if (!list.length) { showToast('Выберите заказы для печати', true); return; }
+    if (list.length > PRINT_MAX) { showToast('За один раз — не больше ' + PRINT_MAX + ' заказов', true); return; }
+    openExternal(buildPrintUrl(list));
+  }
+
+  function updatePrintBar() {
+    var n = Object.keys(selectedIds).length;
+    printBar.classList.toggle('show', selectMode);
+    document.body.classList.toggle('has-print-bar', selectMode);
+    pbPrint.textContent = n ? 'Напечатать (' + n + ')' : 'Напечатать';
+    pbPrint.disabled = n === 0;
+  }
+
+  function setSelectMode(on) {
+    selectMode = !!on;
+    selectedIds = {};
+    editingOrderId = null;
+    selectModeBtn.classList.toggle('select-mode', selectMode);
+    renderListOrders();
+    updatePrintBar();
+  }
+
+  function toggleSelect(id) {
+    if (selectedIds[id]) {
+      delete selectedIds[id];
+    } else {
+      if (Object.keys(selectedIds).length >= PRINT_MAX) {
+        showToast('За один раз — не больше ' + PRINT_MAX + ' заказов', true);
+        return;
+      }
+      selectedIds[id] = true;
+    }
+    renderListOrders();
+    updatePrintBar();
+  }
+
+  selectModeBtn.addEventListener('click', function () { setSelectMode(!selectMode); });
+  pbCancel.addEventListener('click', function () { setSelectMode(false); });
+  pbAll.addEventListener('click', function () {
+    var all = visibleActiveOrders();
+    selectedIds = {};
+    all.slice(0, PRINT_MAX).forEach(function (o) { selectedIds[o.id] = true; });
+    if (all.length > PRINT_MAX) showToast('Выбрано ' + PRINT_MAX + ' из ' + all.length + ': больше за раз нельзя', true);
+    renderListOrders();
+    updatePrintBar();
+  });
+  pbPrint.addEventListener('click', function () {
+    var list = visibleActiveOrders().filter(function (o) { return selectedIds[o.id]; });
+    printOrders(list);
+    setSelectMode(false);
   });
 
   /* ---------- Init ---------- */

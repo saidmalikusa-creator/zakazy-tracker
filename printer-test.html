@@ -98,7 +98,9 @@
       <button id="btnTest1" class="full" disabled>Тест 1: текст и рамка (встроенные шрифты)</button>
       <button id="btnTest2" class="full" disabled>Тест 2: линейка и метки (картинкой)</button>
       <button id="btnTest3" class="full" disabled>Тест 3: этикетка с данными ниже</button>
+      <button id="btnTest4" class="full" disabled>Тест 4: линейка в мм на всю ширину головки (72 мм)</button>
     </div>
+    <p class="hint">Тест 4: найдите на этикетке последнюю цифру справа (где линейка обрывается) и первую слева, и пришлите мне эти два числа. Так мы узнаем, сколько миллиметров принтер реально печатает.</p>
     <p class="hint">Тест 2: по краю должна быть рамка, по верхней и левой стороне линейка (штрих каждые 5 мм), слева вверху чёрный квадрат, а буква F читаться ровно, не зеркально и не вверх ногами.</p>
     <div id="progress"></div>
   </div>
@@ -130,7 +132,7 @@
 
   <div class="card">
     <details>
-      <summary>Настройки (менять, только если что-то не так)</summary>
+      <summary>Настройки (менять, только если что-то не так; те же настройки использует страница печати из мини-аппа)</summary>
       <div class="grid">
         <div><label for="chunk">Размер пакета, байт</label><input type="number" id="chunk" min="1" max="512"></div>
         <div><label for="delay">Пауза между пакетами, мс</label><input type="number" id="delay" min="0" max="500"></div>
@@ -153,6 +155,7 @@
         <div><label for="shiftX">Сдвиг по X, точек</label><input type="number" id="shiftX" min="0" max="400"></div>
         <div><label for="shiftY">Сдвиг по Y, точек</label><input type="number" id="shiftY" min="-200" max="200"></div>
         <div><label for="threshold">Порог чёрного (0–255)</label><input type="number" id="threshold" min="0" max="255"></div>
+        <div><label for="marginX">Поля слева и справа, точек</label><input type="number" id="marginX" min="8" max="80"></div>
         <div><label for="escFinish">ESC/POS: после печати</label>
           <select id="escFinish">
             <option value="none">Ничего</option>
@@ -602,13 +605,13 @@
     '0000fee7-0000-1000-8000-00805f9b34fb',
     '0000180a-0000-1000-8000-00805f9b34fb'
   ];
-  var WRITER_PRIORITY = ['0000ff00', '000018f0', 'e7810a71', '49535343', '0000ffe0', '0000fff0', '0000ae30', '6e400001'];
+  var WRITER_PRIORITY = ['49535343', '0000ff00', '000018f0', 'e7810a71', '0000ffe0', '0000fff0', '0000ae30', '6e400001'];
 
   var DEFAULTS = {
-    protocol: 'tspl', chunk: 20, delay: 10, writeMode: 'auto',
-    widthMm: 58, heightMm: 40, gapMm: 2, density: 8, speed: 3, direction: 0, mirror: 0,
+    protocol: 'tspl', chunk: 100, delay: 2, writeMode: 'auto',
+    widthMm: 56, heightMm: 40, gapMm: 2, density: 8, speed: 3, direction: 0, mirror: 0,
     invert: false, threshold: 160, shiftX: 0, shiftY: 0, trim: true, copies: 1, escFinish: 'none',
-    extraUuids: '', lastWriter: '',
+    marginX: 20, extraUuids: '', lastWriter: '',
     fio: 'Шухрат Злой', phone: '+998 77 333 37 77',
     address: 'Ташкент Шайхон тохур район', products: 'Масло тмина, Сырные палочки, Казы айран, сыр.'
   };
@@ -617,7 +620,7 @@
     ['widthMm', 'widthMm', 'n'], ['heightMm', 'heightMm', 'n'], ['gapMm', 'gapMm', 'n'], ['density', 'density', 'n'],
     ['speed', 'speed', 'n'], ['direction', 'direction', 'n'], ['mirror', 'mirror', 'n'], ['invert', 'invert', 'b'],
     ['threshold', 'threshold', 'n'], ['shiftX', 'shiftX', 'n'], ['shiftY', 'shiftY', 'n'], ['trim', 'trim', 'b'],
-    ['copies', 'copies', 'n'], ['escFinish', 'escFinish', 's'], ['extraUuids', 'extraUuids', 's'],
+    ['copies', 'copies', 'n'], ['marginX', 'marginX', 'n'], ['escFinish', 'escFinish', 's'], ['extraUuids', 'extraUuids', 's'],
     ['fFio', 'fio', 's'], ['fPhone', 'phone', 's'], ['fAddress', 'address', 's'], ['fProducts', 'products', 's']
   ];
 
@@ -683,7 +686,18 @@
     for (var i = 0; i < dv.byteLength; i++) { var c = dv.getUint8(i); if (c) s += String.fromCharCode(c); }
     return s;
   }
-  function shortUuid(u) { return String(u).slice(0, 8); }
+  function normUuid(u) {
+    u = String(u || '').toLowerCase();
+    if (/^[0-9a-f]{4}$/.test(u)) return '0000' + u + '-0000-1000-8000-00805f9b34fb';
+    if (/^[0-9a-f]{8}$/.test(u)) return u + '-0000-1000-8000-00805f9b34fb';
+    return u;
+  }
+  function normPair(p) { var a = String(p || '').split('|'); return a.length === 2 ? normUuid(a[0]) + '|' + normUuid(a[1]) : ''; }
+  function shortUuid(u) {
+    var n = normUuid(u);
+    if (n.slice(8) === '-0000-1000-8000-00805f9b34fb' && n.slice(0, 4) === '0000') return n.slice(4, 8).toUpperCase();
+    return n.slice(0, 8).toUpperCase();
+  }
   function propsText(p) {
     var a = [];
     ['read', 'write', 'writeWithoutResponse', 'notify', 'indicate'].forEach(function (k) { if (p && p[k]) a.push(k); });
@@ -691,6 +705,7 @@
   }
   function friendlyError(e) {
     var n = (e && e.name) || 'Error', m = (e && e.message) || String(e);
+    if (/^\d+$/.test(m)) return 'Bluefy вернул код ' + m + ' (так бывает при первом запуске или если выбор закрыли); нажмите кнопку ещё раз';
     if (n === 'NotFoundError') return 'Устройство не выбрано или сервис не найден (' + m + ')';
     if (n === 'SecurityError') return 'Браузер запретил доступ (нужен HTTPS и нажатие кнопки): ' + m;
     if (n === 'NetworkError') return 'Не удалось выполнить операцию Bluetooth: закройте приложение принтера (оно может занимать принтер), приблизьте телефон, выключите и включите принтер. ' + m;
@@ -705,7 +720,7 @@
   function isConnected() { return !!(device && device.gatt && device.gatt.connected && writer); }
   function updateUi() {
     var ok = isConnected() && !busy;
-    ['btnTest1', 'btnTest2', 'btnTest3', 'btnPrint', 'btnGap', 'btnAuto', 'btnFeed', 'btnSelf', 'btnFF'].forEach(function (id) {
+    ['btnTest1', 'btnTest2', 'btnTest3', 'btnTest4', 'btnPrint', 'btnGap', 'btnAuto', 'btnFeed', 'btnSelf', 'btnFF'].forEach(function (id) {
       $(id).disabled = !ok;
     });
     $('btnFind').disabled = busy;
@@ -761,7 +776,7 @@
       catch (e3) { log('  не удалось прочитать характеристики: ' + (e3 && e3.name), 'err'); continue; }
       for (var ci = 0; ci < chars.length; ci++) {
         log('   ' + chars[ci].uuid + '  [' + propsText(chars[ci].properties) + ']');
-        found.push({ svc: svc.uuid, ch: chars[ci] });
+        found.push({ svc: normUuid(svc.uuid), ch: chars[ci] });
       }
     }
     await readDeviceInfo();
@@ -775,7 +790,7 @@
   async function readDeviceInfo() {
     var names = { '00002a29': 'производитель', '00002a24': 'модель', '00002a26': 'прошивка', '00002a27': 'ревизия', '00002a25': 'серийный номер' };
     for (var i = 0; i < found.length; i++) {
-      var f = found[i], key = f.ch.uuid.slice(0, 8);
+      var f = found[i], key = normUuid(f.ch.uuid).slice(0, 8);
       if (f.svc.slice(0, 8) === '0000180a' && names[key] && f.ch.properties && f.ch.properties.read) {
         try { var dv = await f.ch.readValue(); log('Инфо: ' + names[key] + ' = ' + decodeText(dv), 'ok'); }
         catch (e) { /* ignore */ }
@@ -800,7 +815,7 @@
       writer = null; return;
     }
     var pick = -1, i2, j;
-    for (i2 = 0; i2 < list.length; i2++) { if ((list[i2].svc + '|' + list[i2].ch.uuid) === S.lastWriter) { pick = i2; break; } }
+    for (i2 = 0; i2 < list.length; i2++) { if ((list[i2].svc + '|' + normUuid(list[i2].ch.uuid)) === normPair(S.lastWriter)) { pick = i2; break; } }
     for (j = 0; j < WRITER_PRIORITY.length && pick < 0; j++) {
       for (i2 = 0; i2 < list.length; i2++) {
         if (list[i2].svc.indexOf(WRITER_PRIORITY[j]) === 0 && list[i2].ch.properties.writeWithoutResponse) { pick = i2; break; }
@@ -911,13 +926,37 @@
     c.font = 'bold 120px ' + FONT; c.fillText('F', 90, 80);
   }
 
+  function drawRuler(canvas) {
+    var W = canvas.width, H = canvas.height, c = canvas.getContext('2d');
+    c.fillStyle = '#fff'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#000'; c.textBaseline = 'top';
+    function hr(y0) {
+      for (var mm = 0; mm * 8 < W; mm++) {
+        var x = mm * 8, len = (mm % 10 === 0) ? 26 : (mm % 5 === 0 ? 18 : 9);
+        c.fillRect(Math.min(x, W - 2), y0, 2, len);
+        if (mm % 5 === 0) {
+          c.font = 'bold 20px ' + FONT; c.textAlign = 'center';
+          c.fillText(String(mm), Math.min(Math.max(x, 12), W - 12), y0 + 30);
+        }
+      }
+    }
+    hr(0); hr(Math.round(H / 2) - 30);
+    for (var m = 0; m * 8 < H; m++) {
+      var y = m * 8, l = (m % 10 === 0) ? 26 : (m % 5 === 0 ? 18 : 9);
+      c.fillRect(0, y, l, 2);
+      if (m % 5 === 0 && m > 0) { c.font = 'bold 20px ' + FONT; c.textAlign = 'left'; c.fillText(String(m), 32, y - 10); }
+    }
+    c.textAlign = 'left'; c.font = 'bold 24px ' + FONT; c.fillText('ЛИНЕЙКА, ММ', 90, 62);
+    c.font = '18px ' + FONT; c.fillText('последняя цифра справа = ширина печати', 90, 94);
+  }
+
   function labelOrder() {
     readSettings();
     return { fio: S.fio, phone: S.phone, address: S.address, products: S.products };
   }
   function renderLabelCanvases() {
     readSettings();
-    return LR.renderOrder(createCanvas, labelOrder(), { widthMm: S.widthMm, heightMm: S.heightMm, fontFamily: FONT });
+    return LR.renderOrder(createCanvas, labelOrder(), { widthMm: S.widthMm, heightMm: S.heightMm, fontFamily: FONT, marginX: S.marginX });
   }
   function showPreview() {
     var box = $('preview');
@@ -945,7 +984,7 @@
     $('writerSel').addEventListener('change', function () {
       var sel = $('writerSel'), list = sel._list || [];
       var f = list[parseInt(sel.value, 10)];
-      if (f) { writer = f.ch; S.lastWriter = f.svc + '|' + f.ch.uuid; saveSettings(); log('Для записи выбрана ' + f.ch.uuid, 'ok'); }
+      if (f) { writer = f.ch; S.lastWriter = f.svc + '|' + normUuid(f.ch.uuid); saveSettings(); log('Для записи выбрана ' + f.ch.uuid, 'ok'); }
     });
 
     $('btnTest1').addEventListener('click', function () {
@@ -957,6 +996,14 @@
         var c = createCanvas(Math.round(S.widthMm * 8), Math.round(S.heightMm * 8));
         drawPattern(c);
         await send(bitmapJob(c), 'Тест 2 (' + S.protocol + ', картинка)');
+      });
+    });
+    $('btnTest4').addEventListener('click', function () {
+      runTask('Тест 4', async function () {
+        var o = jobOpts(); o.widthMm = 72;
+        var c = createCanvas(72 * 8, Math.round(S.heightMm * 8));
+        drawRuler(c);
+        await send(PC.buildBitmapJob(S.protocol, LR.toBitmap(c, S.threshold), o), 'Тест 4: линейка 72 мм (' + S.protocol + ')');
       });
     });
     var printLabels = function (name) {

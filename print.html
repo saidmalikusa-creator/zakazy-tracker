@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Печать этикеток</title>
+<style>
+  :root {
+    --bg: #10161f; --card: #1b2430; --card2: #212b39; --text: #eef1f6; --dim: #8996a8;
+    --green: #34c785; --red: #e8564f; --amber: #e3a53e;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; line-height: 1.4; }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 18px 14px 60px; }
+  h1 { font-size: 21px; margin: 6px 0 2px; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  .sub { color: var(--dim); font-size: 13.5px; margin: 0 0 14px; }
+  .card { background: var(--card); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+  .warn { background: #3a1918; color: #ffb3af; border-radius: 12px; padding: 12px; font-size: 14px; margin-bottom: 12px; }
+  .warn div { margin-top: 8px; }
+  .hidden { display: none; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 2px; }
+  button { font: inherit; font-weight: 600; font-size: 15px; color: var(--text); background: var(--card2);
+    border: 0; border-radius: 12px; padding: 12px 14px; cursor: pointer; }
+  button.primary { background: var(--green); color: #08150f; width: 100%; padding: 16px; font-size: 17px; }
+  button:disabled { opacity: .4; cursor: default; }
+  button:active:not(:disabled) { transform: scale(.98); }
+  .status { font-size: 14px; padding: 10px 12px; border-radius: 10px; background: var(--card2); margin: 10px 0 0; min-height: 20px; }
+  .status.ok { color: var(--green); } .status.bad { color: #ff8d86; } .status.wait { color: var(--amber); }
+  .hint { color: var(--dim); font-size: 12.5px; margin: 10px 0 0; }
+  a { color: var(--green); }
+  .ord { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.07); font-size: 14.5px; }
+  .ord:last-child { border-bottom: 0; }
+  .ord .meta { color: var(--dim); font-size: 12.5px; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--dim); font-size: 13.5px; padding: 6px 0; }
+  #preview canvas { width: 100%; max-width: 464px; height: auto; background: #fff; border-radius: 6px; margin: 8px 0; display: block; }
+  #log { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; background: #0a0f16; border-radius: 10px;
+    padding: 8px; max-height: 260px; overflow: auto; margin-top: 8px; user-select: text; -webkit-user-select: text; }
+  #log .l { white-space: pre-wrap; word-break: break-all; margin: 1px 0; color: #b9c4d3; }
+  #log .ok { color: var(--green); } #log .err { color: #ff8d86; } #log .rx { color: #8ec5ff; } #log .tx { color: #d8c27a; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Печать этикеток</h1>
+  <p class="sub" id="sub">Загрузка…</p>
+
+  <div id="noBt" class="warn hidden">
+    <b>В этом браузере нет Bluetooth для печати.</b>
+    <div id="noBtIos" class="hidden">На iPhone откройте эту страницу в бесплатном браузере <b>Bluefy</b> (App Store): нажмите «Скопировать ссылку», откройте Bluefy и вставьте ссылку в его адресную строку.</div>
+    <div id="noBtOther" class="hidden">Откройте эту страницу в <b>Chrome</b> (не во встроенном браузере Телеграма).</div>
+    <div class="row"><button id="btnCopyLink" type="button">Скопировать ссылку</button></div>
+  </div>
+
+  <div id="jobError" class="warn hidden"></div>
+
+  <div class="card" id="jobCard">
+    <h2 id="jobTitle">Заказы</h2>
+    <div id="orders"></div>
+    <details><summary>Показать макеты этикеток</summary><div id="preview"></div></details>
+  </div>
+
+  <div class="card">
+    <button id="btnPrint" class="primary" type="button" disabled>Напечатать</button>
+    <div id="status" class="status"></div>
+    <p class="hint">Включите принтер и закройте его родное приложение. При первой печати выберите принтер в списке. Данные заказов берутся из ссылки и никуда не отправляются. Настройки принтера: <a href="printer-test.html">тест и настройка печати</a>.</p>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Журнал (для диагностики)</summary>
+      <div class="row"><button id="btnCopy" type="button">Скопировать журнал</button></div>
+      <div id="log"></div>
+    </details>
+  </div>
+</div>
+
+<script id="core">
+
+/* PrinterCore: builds print jobs for TSPL / CPCL / ESC-POS. No DOM, no Bluetooth. */
+(function (root) {
+  'use strict';
+
+  function ascii(str) {
+    var out = new Uint8Array(str.length);
+    for (var i = 0; i < str.length; i++) out[i] = str.charCodeAt(i) & 0xFF;
+    return out;
+  }
+  function concat(parts) {
+    var n = 0, i;
+    for (i = 0; i < parts.length; i++) n += parts[i].length;
+    var out = new Uint8Array(n), o = 0;
+    for (i = 0; i < parts.length; i++) { out.set(parts[i], o); o += parts[i].length; }
+    return out;
+  }
+  function invertBytes(data) {
+    var out = new Uint8Array(data.length);
+    for (var i = 0; i < data.length; i++) out[i] = (~data[i]) & 0xFF;
+    return out;
+  }
+
+  // bmp = { width, height, widthBytes, data }, 1 = black dot, MSB first
+  function trimBlankRows(bmp) {
+    var wb = bmp.widthBytes, h = bmp.height, d = bmp.data, first = -1, last = -1, x, y;
+    for (y = 0; y < h; y++) {
+      var any = false;
+      for (x = 0; x < wb; x++) { if (d[y * wb + x]) { any = true; break; } }
+      if (any) { if (first < 0) first = y; last = y; }
+    }
+    if (first < 0) return { y0: 0, bmp: { width: bmp.width, height: 1, widthBytes: wb, data: new Uint8Array(wb) } };
+    return {
+      y0: first,
+      bmp: { width: bmp.width, height: last - first + 1, widthBytes: wb, data: d.slice(first * wb, (last + 1) * wb) }
+    };
+  }
+
+  function buildTSPL(bmp, o) {
+    var t = o.trim ? trimBlankRows(bmp) : { y0: 0, bmp: bmp };
+    var bits = invertBytes(t.bmp.data);            // TSPL: 0 = black dot
+    if (o.invert) bits = invertBytes(bits);
+    var head = 'SIZE ' + o.widthMm + ' mm,' + o.heightMm + ' mm\r\n' +
+      'GAP ' + o.gapMm + ' mm,0 mm\r\n' +
+      'DIRECTION ' + (o.direction | 0) + ',' + (o.mirror | 0) + '\r\n' +
+      'REFERENCE 0,0\r\n' +
+      'DENSITY ' + (o.density | 0) + '\r\n' +
+      'SPEED ' + o.speed + '\r\n' +
+      'CLS\r\n' +
+      'BITMAP ' + (o.shiftX | 0) + ',' + ((t.y0 + (o.shiftY | 0)) | 0) + ',' + t.bmp.widthBytes + ',' + t.bmp.height + ',0,';
+    var tail = '\r\nPRINT ' + ((o.copies | 0) || 1) + ',1\r\n';
+    return concat([ascii(head), bits, ascii(tail)]);
+  }
+
+  function buildCPCL(bmp, o) {
+    var t = o.trim ? trimBlankRows(bmp) : { y0: 0, bmp: bmp };
+    var bits = t.bmp.data;                          // CPCL: 1 = black dot
+    if (o.invert) bits = invertBytes(bits);
+    var H = Math.round(o.heightMm * 8);
+    var W = Math.round(o.widthMm * 8) + (o.shiftX | 0);
+    var head = '! 0 200 200 ' + H + ' ' + (((o.copies | 0) || 1)) + '\r\n' +
+      'PAGE-WIDTH ' + W + '\r\n' +
+      'CG ' + t.bmp.widthBytes + ' ' + t.bmp.height + ' ' + (o.shiftX | 0) + ' ' + ((t.y0 + (o.shiftY | 0)) | 0) + ' ';
+    return concat([ascii(head), bits, ascii('\r\nFORM\r\nPRINT\r\n')]);
+  }
+
+  function buildESCPOS(bmp, o) {
+    var wb = bmp.widthBytes;
+    var shiftBytes = Math.max(0, Math.round((o.shiftX | 0) / 8));
+    var fullWb = wb + shiftBytes;
+    var data = o.invert ? invertBytes(bmp.data) : bmp.data;  // ESC/POS: 1 = black dot
+    var parts = [new Uint8Array([0x1B, 0x40])];
+    var band = 128;
+    for (var y = 0; y < bmp.height; y += band) {
+      var h = Math.min(band, bmp.height - y);
+      var rows = new Uint8Array(fullWb * h);
+      for (var r = 0; r < h; r++) rows.set(data.subarray((y + r) * wb, (y + r + 1) * wb), r * fullWb + shiftBytes);
+      parts.push(new Uint8Array([0x1D, 0x76, 0x30, 0x00, fullWb & 0xFF, (fullWb >> 8) & 0xFF, h & 0xFF, (h >> 8) & 0xFF]));
+      parts.push(rows);
+    }
+    if (o.escFinish === 'ff') parts.push(new Uint8Array([0x0C]));
+    else if (o.escFinish === 'gsff') parts.push(new Uint8Array([0x1D, 0x0C]));
+    else if (o.escFinish === 'lf3') parts.push(new Uint8Array([0x0A, 0x0A, 0x0A]));
+    return concat(parts);
+  }
+
+  function buildBitmapJob(protocol, bmp, o) {
+    if (protocol === 'cpcl') return buildCPCL(bmp, o);
+    if (protocol === 'escpos') return buildESCPOS(bmp, o);
+    return buildTSPL(bmp, o);
+  }
+
+  function textTest(protocol, o) {
+    var W = Math.round(o.widthMm * 8), H = Math.round(o.heightMm * 8);
+    var size = o.widthMm + 'x' + o.heightMm + ' mm';
+    if (protocol === 'cpcl') {
+      return ascii('! 0 200 200 ' + H + ' 1\r\nPAGE-WIDTH ' + W + '\r\n' +
+        'BOX 4 4 ' + (W - 4) + ' ' + (H - 4) + ' 3\r\n' +
+        'TEXT 4 0 24 28 CPCL TEST OK\r\nTEXT 4 0 24 84 ' + size + '\r\nFORM\r\nPRINT\r\n');
+    }
+    if (protocol === 'escpos') {
+      return ascii('\x1B@ESC/POS TEST OK\n' + size + '\n\n\n');
+    }
+    return ascii('SIZE ' + o.widthMm + ' mm,' + o.heightMm + ' mm\r\n' +
+      'GAP ' + o.gapMm + ' mm,0 mm\r\n' +
+      'DIRECTION ' + (o.direction | 0) + ',' + (o.mirror | 0) + '\r\n' +
+      'DENSITY ' + (o.density | 0) + '\r\n' +
+      'SPEED ' + o.speed + '\r\n' +
+      'CLS\r\n' +
+      'BOX 4,4,' + (W - 4) + ',' + (H - 4) + ',3\r\n' +
+      'TEXT 24,28,"3",0,1,1,"TSPL TEST OK"\r\n' +
+      'TEXT 24,84,"2",0,1,1,"' + size + '"\r\n' +
+      'PRINT 1,1\r\n');
+  }
+
+  function serviceCmd(kind, o) {
+    var pre = 'SIZE ' + o.widthMm + ' mm,' + o.heightMm + ' mm\r\nGAP ' + o.gapMm + ' mm,0 mm\r\n';
+    switch (kind) {
+      case 'gapdetect': return ascii(pre + 'GAPDETECT\r\n');
+      case 'autodetect': return ascii(pre + 'AUTODETECT\r\n');
+      case 'formfeed': return ascii(pre + 'FORMFEED\r\n');
+      case 'selftest': return ascii('SELFTEST\r\n');
+      case 'ff': return new Uint8Array([0x0C]);
+    }
+    return new Uint8Array(0);
+  }
+
+  root.PrinterCore = {
+    ascii: ascii, concat: concat, invertBytes: invertBytes, trimBlankRows: trimBlankRows,
+    buildTSPL: buildTSPL, buildCPCL: buildCPCL, buildESCPOS: buildESCPOS, buildBitmapJob: buildBitmapJob,
+    textTest: textTest, serviceCmd: serviceCmd
+  };
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+
+<script id="renderer">
+/*
+ * label-renderer.js
+ * Lays out and draws an order label for a 58x40 mm thermal label (203 dpi, 8 dots/mm).
+ * Same file is meant to run in the Mini App (preview) and in the printing helper app (real print).
+ * No dependencies: you pass in a function that creates a canvas (browser or Node).
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.LabelRenderer = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  var DPMM = 8;
+
+  var DEFAULTS = {
+    widthMm: 58,
+    heightMm: 40,
+    marginX: 20,
+    marginY: 14,
+    fontFamily: '"LabelFont", "DejaVu Sans", "Noto Sans", Arial, sans-serif',
+    nameMax: 34, nameMin: 22,
+    phoneMax: 40, phoneMin: 26,
+    addrMax: 26, addrMin: 20, addrMaxLines: 3,
+    prodMax: 28, prodMin: 18,
+    compactSize: 24,
+    markerSize: 18,
+    lineFactor: 1.2
+  };
+
+  // 24x24 line icons (stroke based), drawn with Path2D
+  var ICON_PATHS = {
+    user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z',
+    phone: 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z',
+    home: 'M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 22V12h6v10'
+  };
+  var P2D = (typeof Path2D !== 'undefined') ? Path2D : null;
+  function setPath2D(ctor) { P2D = ctor; }
+
+  function opts(o) {
+    var r = {}, k;
+    for (k in DEFAULTS) r[k] = DEFAULTS[k];
+    if (o) for (k in o) r[k] = o[k];
+    r.W = Math.round(r.widthMm * DPMM);
+    r.H = Math.round(r.heightMm * DPMM);
+    return r;
+  }
+
+  function font(weight, size, family) {
+    return weight + ' ' + size + 'px ' + family;
+  }
+
+  function wrapText(ctx, text, maxW) {
+    var out = [];
+    String(text == null ? '' : text).replace(/\r/g, '').split('\n').forEach(function (para) {
+      var words = para.split(/\s+/).filter(Boolean);
+      if (!words.length) { out.push(''); return; }
+      var line = '';
+      words.forEach(function (w) {
+        var test = line ? line + ' ' + w : w;
+        if (ctx.measureText(test).width <= maxW) { line = test; return; }
+        if (line) { out.push(line); line = ''; }
+        if (ctx.measureText(w).width <= maxW) { line = w; return; }
+        var chunk = '';
+        Array.from(w).forEach(function (ch) {
+          var t = chunk + ch;
+          if (ctx.measureText(t).width > maxW && chunk) { out.push(chunk); chunk = ch; }
+          else chunk = t;
+        });
+        line = chunk;
+      });
+      if (line) out.push(line);
+    });
+    return out;
+  }
+
+  function fitLine(ctx, text, weight, family, maxW, maxPx, minPx) {
+    text = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+    for (var size = maxPx; size >= minPx; size--) {
+      ctx.font = font(weight, size, family);
+      if (ctx.measureText(text).width <= maxW) return { text: text, size: size };
+    }
+    ctx.font = font(weight, minPx, family);
+    var chars = Array.from(text);
+    while (chars.length > 1 && ctx.measureText(chars.join('') + '\u2026').width > maxW) chars.pop();
+    return { text: chars.join('') + '\u2026', size: minPx };
+  }
+
+  function fitBlock(ctx, text, weight, family, maxW, maxH, maxPx, minPx, lineFactor, maxLines) {
+    for (var size = maxPx; size >= minPx; size--) {
+      ctx.font = font(weight, size, family);
+      var lines = wrapText(ctx, text, maxW);
+      var lineH = Math.round(size * lineFactor);
+      if (lines.length * lineH <= maxH && (!maxLines || lines.length <= maxLines)) {
+        return { size: size, lines: lines, lineH: lineH };
+      }
+    }
+    return null;
+  }
+
+  // Header: name, phone (and address on the first label), each with a small icon on the left.
+  function buildHeader(ctx, order, o, compact) {
+    var ops = [];
+    var iconBox = compact ? 20 : 28;
+    var iconGap = compact ? 6 : 8;
+    var textX = o.marginX + iconBox + iconGap;
+    var textW = o.W - o.marginX - textX;
+    var y = o.marginY;
+
+    function iconOp(name, fontSize, lineY) {
+      var is = Math.min(iconBox, Math.round(fontSize * 0.9));
+      ops.push({ t: 'icon', n: name, x: o.marginX + Math.round((iconBox - is) / 2), y: lineY + Math.round(fontSize * 0.14), s: is });
+    }
+
+    var name = fitLine(ctx, order.fio, 'bold', o.fontFamily, textW, compact ? o.compactSize : o.nameMax, compact ? 18 : o.nameMin);
+    iconOp('user', name.size, y);
+    ops.push({ t: 'text', s: name.text, x: textX, y: y, f: font('bold', name.size, o.fontFamily) });
+    y += Math.round(name.size * 1.2);
+
+    var phone = fitLine(ctx, order.phone, 'bold', o.fontFamily, textW, compact ? o.compactSize : o.phoneMax, compact ? 18 : o.phoneMin);
+    iconOp('phone', phone.size, y);
+    ops.push({ t: 'text', s: phone.text, x: textX, y: y, f: font('bold', phone.size, o.fontFamily) });
+    y += Math.round(phone.size * 1.25);
+
+    if (!compact) {
+      var addrH = o.addrMaxLines * Math.round(o.addrMax * o.lineFactor);
+      var addr = fitBlock(ctx, order.address, 'normal', o.fontFamily, textW, addrH, o.addrMax, o.addrMin, o.lineFactor, o.addrMaxLines);
+      if (!addr) {
+        ctx.font = font('normal', o.addrMin, o.fontFamily);
+        var lines = wrapText(ctx, order.address, textW).slice(0, o.addrMaxLines);
+        var last = lines[lines.length - 1] || '';
+        var chars = Array.from(last);
+        while (chars.length > 1 && ctx.measureText(chars.join('') + '\u2026').width > textW) chars.pop();
+        lines[lines.length - 1] = chars.join('') + '\u2026';
+        addr = { size: o.addrMin, lines: lines, lineH: Math.round(o.addrMin * o.lineFactor) };
+      }
+      iconOp('home', addr.size, y);
+      addr.lines.forEach(function (ln, i) {
+        ops.push({ t: 'text', s: ln, x: textX, y: y + i * addr.lineH, f: font('normal', addr.size, o.fontFamily) });
+      });
+      y += addr.lines.length * addr.lineH;
+    }
+    y += 4;
+    ops.push({ t: 'line', x1: o.marginX, y1: y, x2: o.W - o.marginX, y2: y, w: 2 });
+    y += 6;
+    return { ops: ops, bodyY: y };
+  }
+
+  // Returns an array of labels; each label = { ops: [...], page, pages }
+  function layoutOrder(ctx, order, userOpts) {
+    var o = opts(userOpts);
+    var innerW = o.W - 2 * o.marginX;
+    var bottom = o.H - o.marginY;
+
+    var head = buildHeader(ctx, order, o, false);
+    var bodyH = bottom - head.bodyY;
+
+    var fit = fitBlock(ctx, order.products, 'normal', o.fontFamily, innerW, bodyH, o.prodMax, o.prodMin, o.lineFactor, 0);
+    if (fit) {
+      var ops = head.ops.slice();
+      fit.lines.forEach(function (ln, i) {
+        ops.push({ t: 'text', s: ln, x: o.marginX, y: head.bodyY + i * fit.lineH, f: font('normal', fit.size, o.fontFamily) });
+      });
+      return [{ ops: ops, page: 1, pages: 1, fontSize: fit.size }];
+    }
+
+    // Does not fit even at the minimum font: split over several labels at the minimum font.
+    ctx.font = font('normal', o.prodMin, o.fontFamily);
+    var allLines = wrapText(ctx, order.products, innerW);
+    var lineH = Math.round(o.prodMin * o.lineFactor);
+    var band = o.markerSize + 6;
+    var pages = [];
+    var idx = 0;
+
+    var cap1 = Math.max(1, Math.floor((bodyH - band) / lineH));
+    pages.push({ head: head, lines: allLines.slice(idx, idx + cap1) });
+    idx += cap1;
+
+    while (idx < allLines.length) {
+      var ch = buildHeader(ctx, order, o, true);
+      var cap = Math.max(1, Math.floor((bottom - ch.bodyY - band) / lineH));
+      pages.push({ head: ch, lines: allLines.slice(idx, idx + cap) });
+      idx += cap;
+    }
+
+    return pages.map(function (p, i) {
+      var ops = p.head.ops.slice();
+      p.lines.forEach(function (ln, j) {
+        ops.push({ t: 'text', s: ln, x: o.marginX, y: p.head.bodyY + j * lineH, f: font('normal', o.prodMin, o.fontFamily) });
+      });
+      ops.push({ t: 'text', s: (i + 1) + '/' + pages.length, x: o.W - o.marginX, y: bottom - o.markerSize, f: font('bold', o.markerSize, o.fontFamily), a: 'right' });
+      return { ops: ops, page: i + 1, pages: pages.length, fontSize: o.prodMin };
+    });
+  }
+
+  function drawLabel(ctx, label, userOpts) {
+    var o = opts(userOpts);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, o.W, o.H);
+    ctx.fillStyle = '#000000';
+    ctx.strokeStyle = '#000000';
+    ctx.textBaseline = 'top';
+    label.ops.forEach(function (op) {
+      if (op.t === 'text') {
+        ctx.font = op.f;
+        ctx.textAlign = op.a || 'left';
+        ctx.fillText(op.s, op.x, op.y);
+      } else if (op.t === 'icon') {
+        if (P2D && ICON_PATHS[op.n]) {
+          var sc = op.s / 24;
+          ctx.save();
+          ctx.translate(op.x, op.y);
+          ctx.scale(sc, sc);
+          ctx.lineWidth = 3;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.stroke(new P2D(ICON_PATHS[op.n]));
+          ctx.restore();
+        }
+      } else if (op.t === 'line') {
+        ctx.lineWidth = op.w;
+        ctx.beginPath();
+        ctx.moveTo(op.x1, op.y1);
+        ctx.lineTo(op.x2, op.y2);
+        ctx.stroke();
+      }
+    });
+  }
+
+  // createCanvas(w, h) must return an object with getContext('2d')
+  function renderOrder(createCanvas, order, userOpts) {
+    var o = opts(userOpts);
+    var labels = layoutOrder(createCanvas(1, 1).getContext('2d'), order, userOpts);
+    return labels.map(function (label) {
+      var c = createCanvas(o.W, o.H);
+      drawLabel(c.getContext('2d'), label, userOpts);
+      return c;
+    });
+  }
+
+  // Packs a canvas into a 1-bit bitmap, 8 pixels per byte, MSB first, 1 = black dot.
+  function toBitmap(canvas, threshold) {
+    threshold = threshold == null ? 150 : threshold;
+    var w = canvas.width, h = canvas.height;
+    var px = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+    var wb = Math.ceil(w / 8);
+    var data = new Uint8Array(wb * h);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var i = (y * w + x) * 4;
+        var lum = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        if (px[i + 3] > 0 && lum < threshold) data[y * wb + (x >> 3)] |= (0x80 >> (x & 7));
+      }
+    }
+    return { width: w, height: h, widthBytes: wb, data: data };
+  }
+
+  return {
+    DPMM: DPMM,
+    DEFAULTS: DEFAULTS,
+    layoutOrder: layoutOrder,
+    drawLabel: drawLabel,
+    renderOrder: renderOrder,
+    toBitmap: toBitmap,
+    setPath2D: setPath2D
+  };
+});
+
+</script>
+
+<script id="ui">
+(function () {
+  'use strict';
+  var PC = window.PrinterCore;
+  var LR = window.LabelRenderer;
+  function $(id) { return document.getElementById(id); }
+
+  var FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "DejaVu Sans", Arial, sans-serif';
+  var KNOWN_SERVICES = [
+    '0000ff00-0000-1000-8000-00805f9b34fb', '000018f0-0000-1000-8000-00805f9b34fb',
+    'e7810a71-73ae-499d-8c15-faa9aef0c3f2', '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+    '0000ffe0-0000-1000-8000-00805f9b34fb', '0000fff0-0000-1000-8000-00805f9b34fb',
+    '0000ae30-0000-1000-8000-00805f9b34fb', '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+    '0000fee7-0000-1000-8000-00805f9b34fb', '0000180a-0000-1000-8000-00805f9b34fb'
+  ];
+  var WRITER_PRIORITY = ['49535343', '0000ff00', '000018f0', 'e7810a71', '0000ffe0', '0000fff0', '0000ae30', '6e400001'];
+  var MAX_ORDERS = 50;
+
+  // Same keys as on the test page: settings tuned there are used here too (same site = same storage).
+  var DEFAULTS = {
+    protocol: 'tspl', chunk: 100, delay: 2, writeMode: 'auto',
+    widthMm: 56, heightMm: 40, gapMm: 2, density: 8, speed: 3, direction: 0, mirror: 0,
+    invert: false, threshold: 160, shiftX: 0, shiftY: 0, trim: true, copies: 1, escFinish: 'none',
+    marginX: 20, extraUuids: '', lastWriter: ''
+  };
+  var S = {};
+  function loadSettings() {
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('ptSettings') || '{}') || {}; } catch (e) { saved = {}; }
+    for (var k in DEFAULTS) {
+      var v = (saved[k] !== undefined && saved[k] !== null && saved[k] !== '') ? saved[k] : DEFAULTS[k];
+      if (typeof DEFAULTS[k] === 'number') { v = parseFloat(v); if (isNaN(v)) v = DEFAULTS[k]; }
+      S[k] = v;
+    }
+  }
+
+  /* ---------- log ---------- */
+  var logEl = $('log'), logLines = [];
+  function pad(n, l) { n = String(n); while (n.length < l) n = '0' + n; return n; }
+  function ts() { var d = new Date(); return pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2) + '.' + pad(d.getMilliseconds(), 3); }
+  function log(msg, kind) {
+    var line = ts() + ' ' + msg; logLines.push(line);
+    var div = document.createElement('div'); div.className = 'l ' + (kind || ''); div.textContent = line;
+    logEl.appendChild(div); logEl.scrollTop = logEl.scrollHeight;
+  }
+  function hex(u8, max) {
+    var n = Math.min(u8.length, max || 32), s = [];
+    for (var i = 0; i < n; i++) s.push((u8[i] < 16 ? '0' : '') + u8[i].toString(16));
+    return s.join(' ') + (u8.length > n ? ' …(+' + (u8.length - n) + ')' : '');
+  }
+  function normUuid(u) {
+    u = String(u || '').toLowerCase();
+    if (/^[0-9a-f]{4}$/.test(u)) return '0000' + u + '-0000-1000-8000-00805f9b34fb';
+    if (/^[0-9a-f]{8}$/.test(u)) return u + '-0000-1000-8000-00805f9b34fb';
+    return u;
+  }
+  function normPair(p) { var a = String(p || '').split('|'); return a.length === 2 ? normUuid(a[0]) + '|' + normUuid(a[1]) : ''; }
+  function shortUuid(u) {
+    var n = normUuid(u);
+    if (n.slice(8) === '-0000-1000-8000-00805f9b34fb' && n.slice(0, 4) === '0000') return n.slice(4, 8).toUpperCase();
+    return n.slice(0, 8).toUpperCase();
+  }
+  function propsText(p) {
+    var a = []; ['read', 'write', 'writeWithoutResponse', 'notify', 'indicate'].forEach(function (k) { if (p && p[k]) a.push(k); });
+    return a.join(', ');
+  }
+  function friendlyError(e) {
+    var n = (e && e.name) || 'Error', m = (e && e.message) || String(e);
+    if (/^\d+$/.test(m)) return 'Bluefy вернул код ' + m + ' (так бывает при первом запуске или если выбор закрыли); нажмите кнопку ещё раз';
+    if (n === 'NotFoundError') return 'принтер не выбран или не найден';
+    if (n === 'SecurityError') return 'браузер запретил доступ к Bluetooth';
+    if (n === 'NetworkError') return 'не удалось связаться с принтером (закройте его родное приложение, приблизьтесь, выключите и включите принтер)';
+    if (n === 'InvalidStateError') return 'связь с принтером потеряна';
+    return n + ': ' + m;
+  }
+  function plural(n, one, few, many) {
+    var a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return many;
+    if (b > 1 && b < 5) return few;
+    if (b === 1) return one;
+    return many;
+  }
+
+  /* ---------- job from the link ---------- */
+  function clip(v, n) { return String(v == null ? '' : v).slice(0, n); }
+  function b64urlDecode(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function parseJob() {
+    var m = /[#&]j=([A-Za-z0-9_\-]+)/.exec(location.hash || '');
+    if (!m) return { error: 'В ссылке нет заказов. Нажмите «Печать» в мини-аппе, чтобы открыть эту страницу.' };
+    var data;
+    try { data = JSON.parse(new TextDecoder('utf-8').decode(b64urlDecode(m[1]))); }
+    catch (e) { return { error: 'Не удалось прочитать заказы из ссылки. Попробуйте нажать «Печать» в мини-аппе ещё раз.' }; }
+    if (!data || data.v !== 1 || !Array.isArray(data.o) || !data.o.length) return { error: 'Ссылка устарела или повреждена. Нажмите «Печать» в мини-аппе ещё раз.' };
+    var orders = data.o.slice(0, MAX_ORDERS).filter(function (a) { return Array.isArray(a); }).map(function (a) {
+      return { fio: clip(a[0], 120), phone: clip(a[1], 40), address: clip(a[2], 400), products: clip(a[3], 2000) };
+    });
+    if (!orders.length) return { error: 'В ссылке нет заказов.' };
+    return { orders: orders };
+  }
+
+  /* ---------- state ---------- */
+  var job = null, labels = [], device = null, server = null, found = [], writer = null, busy = false, next = 0;
+
+  function createCanvas(w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+  function buildLabels() {
+    labels = [];
+    var counts = [];
+    job.orders.forEach(function (o) {
+      var cs = LR.renderOrder(createCanvas, o, { widthMm: S.widthMm, heightMm: S.heightMm, fontFamily: FONT, marginX: S.marginX });
+      counts.push(cs.length);
+      cs.forEach(function (c) { labels.push(c); });
+    });
+    return counts;
+  }
+
+  function setStatus(text, cls) { var el = $('status'); el.textContent = text || ''; el.className = 'status ' + (cls || ''); }
+  function updateUi() {
+    var b = $('btnPrint');
+    if (!job || !labels.length) { b.disabled = true; b.textContent = 'Напечатать'; return; }
+    b.disabled = busy;
+    if (busy) b.textContent = 'Печатаю…';
+    else if (next > 0 && next < labels.length) b.textContent = 'Продолжить с этикетки ' + (next + 1) + ' из ' + labels.length;
+    else b.textContent = 'Напечатать: ' + labels.length + ' ' + plural(labels.length, 'этикетка', 'этикетки', 'этикеток');
+  }
+
+  /* ---------- bluetooth ---------- */
+  function parseUuids(text) {
+    return String(text || '').split(/[\s,;]+/).map(function (s) { return s.trim().toLowerCase(); })
+      .filter(function (s) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s) || /^[0-9a-f]{4}$/.test(s); })
+      .map(function (s) { return s.length === 4 ? '0000' + s + '-0000-1000-8000-00805f9b34fb' : s; });
+  }
+  function isConnected() { return !!(device && device.gatt && device.gatt.connected && writer); }
+  function onDisconnected() { log('Соединение с принтером разорвано.', 'err'); writer = null; }
+
+  async function findPrinter() {
+    var services = KNOWN_SERVICES.concat(parseUuids(S.extraUuids));
+    log('Выбор принтера…');
+    device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: services });
+    log('Выбрано: ' + (device.name || '(без имени)'), 'ok');
+    if (device.addEventListener) device.addEventListener('gattserverdisconnected', onDisconnected);
+    await connectGatt();
+  }
+
+  async function connectGatt() {
+    setStatus('Подключаюсь к принтеру…', 'wait');
+    server = await device.gatt.connect();
+    log('Соединение установлено.', 'ok');
+    found = []; writer = null;
+    var services = [];
+    try { services = await server.getPrimaryServices(); }
+    catch (e) {
+      var list = KNOWN_SERVICES.concat(parseUuids(S.extraUuids));
+      for (var i = 0; i < list.length; i++) { try { services.push(await server.getPrimaryService(list[i])); } catch (e2) { /* absent */ } }
+    }
+    for (var si = 0; si < services.length; si++) {
+      var chars = [];
+      try { chars = await services[si].getCharacteristics(); } catch (e3) { continue; }
+      for (var ci = 0; ci < chars.length; ci++) {
+        found.push({ svc: normUuid(services[si].uuid), ch: chars[ci] });
+        log('   ' + shortUuid(services[si].uuid) + ' / ' + shortUuid(chars[ci].uuid) + ' [' + propsText(chars[ci].properties) + ']');
+      }
+    }
+    var writable = found.filter(function (f) { return f.ch.properties && (f.ch.properties.write || f.ch.properties.writeWithoutResponse); });
+    var pick = null, j, k;
+    for (k = 0; k < writable.length && !pick; k++) { if ((writable[k].svc + '|' + normUuid(writable[k].ch.uuid)) === normPair(S.lastWriter)) pick = writable[k]; }
+    for (j = 0; j < WRITER_PRIORITY.length && !pick; j++) {
+      for (k = 0; k < writable.length; k++) {
+        if (writable[k].svc.indexOf(WRITER_PRIORITY[j]) === 0 && writable[k].ch.properties.writeWithoutResponse) { pick = writable[k]; break; }
+      }
+    }
+    for (j = 0; j < WRITER_PRIORITY.length && !pick; j++) {
+      for (k = 0; k < writable.length; k++) { if (writable[k].svc.indexOf(WRITER_PRIORITY[j]) === 0) { pick = writable[k]; break; } }
+    }
+    if (!pick && writable.length) pick = writable[0];
+    if (!pick) throw new Error('У принтера не найдена характеристика для записи. Проверьте принтер на странице тестов.');
+    writer = pick.ch;
+    log('Для записи выбрана ' + pick.ch.uuid + ' (' + propsText(pick.ch.properties) + ')', 'ok');
+    for (var n = 0; n < found.length; n++) {
+      var f = found[n];
+      if (!(f.ch.properties && (f.ch.properties.notify || f.ch.properties.indicate))) continue;
+      try {
+        await f.ch.startNotifications();
+        f.ch.addEventListener('characteristicvaluechanged', function (ev) {
+          var dv = ev.target.value; log('← ' + hex(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength), 32), 'rx');
+        });
+      } catch (e4) { /* ignore */ }
+    }
+  }
+
+  async function ensureConnected() {
+    if (isConnected()) return;
+    if (device && device.gatt && !device.gatt.connected) {
+      try { await connectGatt(); if (isConnected()) return; } catch (e) { log('Переподключение не удалось, выберите принтер заново.', 'err'); }
+    }
+    await findPrinter();
+  }
+
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  async function send(bytes, label) {
+    var ch = writer;
+    var chunk = Math.max(1, Math.min(512, Math.round(S.chunk) || 20));
+    var delay = Math.max(0, Math.round(S.delay) || 0);
+    var canNoRes = !!(ch.properties && ch.properties.writeWithoutResponse);
+    var useNoRes = S.writeMode === 'nores' ? true : (S.writeMode === 'res' ? false : canNoRes);
+    log('→ ' + label + ': ' + bytes.length + ' байт, пакет ' + chunk + ', пауза ' + delay + ' мс', 'tx');
+    for (var i = 0; i < bytes.length; i += chunk) {
+      var part = bytes.slice(i, i + chunk);
+      if (useNoRes) { if (ch.writeValueWithoutResponse) await ch.writeValueWithoutResponse(part); else await ch.writeValue(part); }
+      else { if (ch.writeValueWithResponse) await ch.writeValueWithResponse(part); else await ch.writeValue(part); }
+      if (delay) await sleep(delay);
+    }
+  }
+
+  function jobOpts() {
+    return {
+      widthMm: S.widthMm, heightMm: S.heightMm, gapMm: S.gapMm, density: S.density, speed: S.speed,
+      direction: S.direction, mirror: S.mirror, invert: S.invert, shiftX: S.shiftX, shiftY: S.shiftY,
+      trim: S.trim, copies: S.copies, escFinish: S.escFinish
+    };
+  }
+
+  async function printAll() {
+    if (busy || !job) return;
+    busy = true; updateUi();
+    try {
+      loadSettings();
+      if (next >= labels.length) next = 0;
+      if (!navigator.bluetooth) throw new Error('Нет Web Bluetooth');
+      await ensureConnected();
+      while (next < labels.length) {
+        setStatus('Печатаю этикетку ' + (next + 1) + ' из ' + labels.length + '…', 'wait');
+        var bmp = LR.toBitmap(labels[next], S.threshold);
+        await send(PC.buildBitmapJob(S.protocol, bmp, jobOpts()), 'этикетка ' + (next + 1) + ' из ' + labels.length);
+        next++;
+        if (next < labels.length) await sleep(700);
+      }
+      setStatus('Готово: напечатано ' + labels.length + ' ' + plural(labels.length, 'этикетка', 'этикетки', 'этикеток') + '. Можно вернуться в Телеграм.', 'ok');
+      next = 0;
+    } catch (e) {
+      log('Ошибка: ' + friendlyError(e), 'err');
+      setStatus((next > 0 ? 'Остановились на этикетке ' + (next + 1) + '. ' : '') + 'Ошибка: ' + friendlyError(e) + '. Нажмите кнопку ещё раз, чтобы ' + (next > 0 ? 'продолжить.' : 'повторить.'), 'bad');
+    }
+    busy = false; updateUi();
+  }
+
+  /* ---------- page setup ---------- */
+  function copyText(text) {
+    var done = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) { return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; }); }
+    } catch (e) { /* fall back */ }
+    try {
+      var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); done = document.execCommand('copy'); document.body.removeChild(ta);
+    } catch (e2) { done = false; }
+    return Promise.resolve(done);
+  }
+
+  function init() {
+    loadSettings();
+    log('Браузер: ' + navigator.userAgent);
+    log('Web Bluetooth: ' + (navigator.bluetooth ? 'есть' : 'НЕТ'));
+    if (!navigator.bluetooth) {
+      $('noBt').classList.remove('hidden');
+      var ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+      $(ios ? 'noBtIos' : 'noBtOther').classList.remove('hidden');
+    }
+    $('btnCopyLink').addEventListener('click', function () {
+      copyText(location.href).then(function (ok) { log(ok ? 'Ссылка скопирована.' : 'Не удалось скопировать ссылку.', ok ? 'ok' : 'err'); $('btnCopyLink').textContent = ok ? 'Ссылка скопирована' : 'Не удалось скопировать'; });
+    });
+    $('btnCopy').addEventListener('click', function () {
+      copyText(logLines.join('\n')).then(function (ok) { log(ok ? 'Журнал скопирован.' : 'Не удалось скопировать: выделите текст вручную.', ok ? 'ok' : 'err'); });
+    });
+    var parsed = parseJob();
+    if (parsed.error) {
+      $('jobError').textContent = parsed.error; $('jobError').classList.remove('hidden');
+      $('jobCard').classList.add('hidden'); $('sub').textContent = '';
+      updateUi(); return;
+    }
+    job = parsed;
+    var counts = buildLabels();
+    $('sub').textContent = job.orders.length + ' ' + plural(job.orders.length, 'заказ', 'заказа', 'заказов') + ' · ' + labels.length + ' ' + plural(labels.length, 'этикетка', 'этикетки', 'этикеток');
+    $('jobTitle').textContent = 'Заказы для печати';
+    var box = $('orders');
+    job.orders.forEach(function (o, i) {
+      var row = document.createElement('div'); row.className = 'ord';
+      var b = document.createElement('b'); b.textContent = o.fio || '(без имени)';
+      var meta = document.createElement('div'); meta.className = 'meta';
+      meta.textContent = o.phone + (counts[i] > 1 ? ' · этикеток: ' + counts[i] : '');
+      row.appendChild(b); row.appendChild(meta); box.appendChild(row);
+    });
+    labels.forEach(function (c) { $('preview').appendChild(c); });
+    $('btnPrint').addEventListener('click', function () { printAll(); });
+    updateUi();
+  }
+  init();
+})();
+</script>
+</body>
+</html>
